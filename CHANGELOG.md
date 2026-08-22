@@ -2,6 +2,12 @@
 
 All notable changes to RoutePlay are documented here. The project follows Semantic Versioning.
 
+## Unreleased
+
+### Changed
+
+- Migrated npm releases to Trusted Publishing with GitHub Actions OIDC, removing the long-lived registry token.
+
 ## 0.1.3 - 2026-08-22
 
 ### Fixed

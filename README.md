@@ -1,6 +1,7 @@
 # RoutePlay
 
 [![CI](https://github.com/lame13/routeplay/actions/workflows/ci.yml/badge.svg)](https://github.com/lame13/routeplay/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/routeplay.svg)](https://www.npmjs.com/package/routeplay)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Regression-test what an SSR server returns, what a fresh browser renders, and what users get after navigating through the app.
