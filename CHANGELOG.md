@@ -2,6 +2,12 @@
 
 All notable changes to RoutePlay are documented here. The project follows Semantic Versioning.
 
+## 0.1.2 - 2026-08-22
+
+### Fixed
+
+- Verify npm authentication before publishing and target the public npm registry explicitly.
+
 ## 0.1.1 - 2026-08-22
 
 ### Fixed
