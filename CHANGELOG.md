@@ -2,6 +2,12 @@
 
 All notable changes to RoutePlay are documented here. The project follows Semantic Versioning.
 
+## 0.1.3 - 2026-08-22
+
+### Fixed
+
+- Report rejected npm publishing credentials with the exact token requirements needed for first-time package publication.
+
 ## 0.1.2 - 2026-08-22
 
 ### Fixed

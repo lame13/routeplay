@@ -32,7 +32,10 @@ jobs:
             echo "::error::NPM_TOKEN is not configured for this repository."
             exit 1
           fi
-          npm whoami --registry=https://registry.npmjs.org
+          if ! npm whoami --registry=https://registry.npmjs.org; then
+            echo "::error::NPM_TOKEN was rejected by npm. Store the raw, full npm granular access token (not a GitHub token or token name), with Read and write access to All Packages, Bypass 2FA enabled, and no incompatible IP restriction."
+            exit 1
+          fi
       - name: Publish package
         run: npm publish --access public --provenance --registry=https://registry.npmjs.org
         env:
