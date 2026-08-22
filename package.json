@@ -1,6 +1,6 @@
 {
   "name": "routeplay",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Regression-test SSR routes across server HTML, cold loads, and real client-side navigation.",
   "keywords": [
     "technical-seo",

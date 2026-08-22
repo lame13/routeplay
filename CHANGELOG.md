@@ -2,6 +2,13 @@
 
 All notable changes to RoutePlay are documented here. The project follows Semantic Versioning.
 
+## 0.1.1 - 2026-08-22
+
+### Fixed
+
+- Kept the TypeScript toolchain compatible with the current `tsup` declaration build so automated dependency updates cannot break packaging.
+- Updated GitHub Actions runners to the current Node.js 24-based action releases.
+
 ## 0.1.0 - 2026-08-21
 
 ### Added
