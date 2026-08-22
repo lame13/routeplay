@@ -1,0 +1,29 @@
+name: Bug report
+description: Report incorrect capture, comparison, or CLI behavior
+body:
+  - type: input
+    id: version
+    attributes:
+      label: RoutePlay version
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: framework
+    attributes:
+      label: Framework
+      options: [Next.js, Nuxt, Astro, Other]
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Remove credentials and private target content.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: RoutePlay output
+      description: Set ROUTEPLAY_DEBUG=1 when a stack trace is needed. Redact target-sensitive data.
+    validations:
+      required: true

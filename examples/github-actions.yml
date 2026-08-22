@@ -1,0 +1,45 @@
+name: RoutePlay
+
+on:
+  deployment_status:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: Preview or production URL to audit
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  security-events: write
+
+jobs:
+  routeplay:
+    if: github.event_name == 'workflow_dispatch' || github.event.deployment_status.state == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Check SSR route parity
+        env:
+          ROUTEPLAY_BASE_URL: ${{ github.event.deployment_status.environment_url || inputs.base_url }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: |
+          test -n "$ROUTEPLAY_BASE_URL"
+          npx routeplay check --config routeplay.config.json --base-url "$ROUTEPLAY_BASE_URL" --format sarif --output routeplay.sarif
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: routeplay.sarif
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: routeplay-report
+          path: routeplay.sarif

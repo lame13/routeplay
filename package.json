@@ -1,0 +1,78 @@
+{
+  "name": "routeplay",
+  "version": "0.1.0",
+  "description": "Regression-test SSR routes across server HTML, cold loads, and real client-side navigation.",
+  "keywords": [
+    "technical-seo",
+    "ssr",
+    "nextjs",
+    "nuxt",
+    "astro",
+    "playwright",
+    "hydration",
+    "client-side-navigation",
+    "regression-testing",
+    "seo-tools"
+  ],
+  "homepage": "https://nikom.work",
+  "bugs": {
+    "url": "https://github.com/lame13/routeplay/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lame13/routeplay.git"
+  },
+  "license": "MIT",
+  "author": "Niko M. <https://nikom.work>",
+  "type": "module",
+  "bin": {
+    "routeplay": "dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "examples",
+    "routeplay.schema.json",
+    "README.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "tsup",
+    "check": "npm run lint && npm run typecheck && npm run test && npm run build",
+    "format": "biome format --write .",
+    "lint": "biome check .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:unit": "vitest run test/config.test.ts test/extract.test.ts test/analyze.test.ts",
+    "test:integration": "vitest run test/integration.test.ts",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "cheerio": "^1.2.0",
+    "commander": "^15.0.0",
+    "picocolors": "^1.1.1",
+    "playwright": "1.62.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.9",
+    "@types/node": "^22.20.1",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11"
+  },
+  "overrides": {
+    "esbuild": "0.28.2"
+  }
+}

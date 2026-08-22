@@ -1,0 +1,16 @@
+{
+  "$schema": "../routeplay.schema.json",
+  "baseUrl": "https://preview.example.com",
+  "headers": {
+    "x-vercel-protection-bypass": "${VERCEL_AUTOMATION_BYPASS_SECRET}",
+    "x-vercel-set-bypass-cookie": "true"
+  },
+  "transitions": [
+    {
+      "name": "Preview home to pricing",
+      "from": "/",
+      "to": "/pricing/",
+      "requireClientNavigation": true
+    }
+  ]
+}

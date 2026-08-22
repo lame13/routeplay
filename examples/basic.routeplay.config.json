@@ -1,0 +1,31 @@
+{
+  "$schema": "../routeplay.schema.json",
+  "baseUrl": "https://example.com",
+  "transitions": [
+    {
+      "name": "Home to product",
+      "from": "/",
+      "to": "/product/",
+      "expectedFinalUrl": "/product/",
+      "selector": "a[href='/product/']",
+      "mainSelector": "main",
+      "ignoreSelectors": ["[data-live-price]", "time"],
+      "readySelector": "main h1",
+      "expectedStatus": 200,
+      "requireClientNavigation": true
+    }
+  ],
+  "browser": {
+    "timeoutMs": 20000,
+    "settleMs": 500,
+    "locale": "en-US",
+    "timezoneId": "UTC",
+    "viewport": { "width": 1440, "height": 900 }
+  },
+  "compare": {
+    "minTextSimilarity": 0.98,
+    "minSourceTextLength": 80,
+    "compareLinks": true
+  },
+  "failOn": "error"
+}
