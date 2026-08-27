@@ -79,6 +79,12 @@ Edit `routeplay.config.json`:
 }
 ```
 
+Validate the config without launching Chromium:
+
+```bash
+npx routeplay validate
+```
+
 Run it:
 
 ```bash

@@ -2,7 +2,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadConfig, normalizeUrl } from "../src/config.js";
+import { loadConfig, normalizeUrl, validateConfigFile } from "../src/config.js";
 
 const previousToken = process.env.ROUTEPLAY_TEST_TOKEN;
 
@@ -103,6 +103,26 @@ describe("loadConfig", () => {
     await expect(loadConfig({ configPath: file })).rejects.toThrow(
       "Authorization references missing environment variable ROUTEPLAY_TEST_TOKEN",
     );
+  });
+
+  it("validates a config file and reports its transition count", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "routeplay-config-"));
+    const file = path.join(directory, "routeplay.config.json");
+    await writeFile(
+      file,
+      JSON.stringify({
+        baseUrl: "https://example.test",
+        transitions: [
+          { from: "/", to: "/about" },
+          { from: "/about", to: "/contact" },
+        ],
+      }),
+    );
+
+    await expect(validateConfigFile(file)).resolves.toEqual({
+      path: file,
+      transitionCount: 2,
+    });
   });
 });
 
