@@ -4,6 +4,12 @@ All notable changes to RoutePlay are documented here. The project follows Semant
 
 ## Unreleased
 
+## 0.2.0 - 2026-08-28
+
+### Added
+
+- Added `routeplay validate` for checking configuration without launching Chromium.
+
 ### Changed
 
 - Migrated npm releases to Trusted Publishing with GitHub Actions OIDC, removing the long-lived registry token.

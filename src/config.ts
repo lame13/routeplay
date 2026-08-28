@@ -169,6 +169,14 @@ export async function loadConfig(options: CheckOptions): Promise<RoutePlayConfig
   };
 }
 
+export async function validateConfigFile(
+  file: string,
+): Promise<{ path: string; transitionCount: number }> {
+  const absolute = path.resolve(file);
+  const config = await loadConfig({ configPath: absolute });
+  return { path: absolute, transitionCount: config.transitions.length };
+}
+
 export const defaultConfig = {
   $schema: "./node_modules/routeplay/routeplay.schema.json",
   baseUrl: "https://example.com",

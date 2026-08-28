@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { Command, Option } from "commander";
 import { launchBrowser } from "./browser.js";
-import { defaultConfig, loadConfig } from "./config.js";
+import { defaultConfig, loadConfig, validateConfigFile } from "./config.js";
 import { htmlReport } from "./reporters/html.js";
 import { jsonReport } from "./reporters/json.js";
 import { sarifReport } from "./reporters/sarif.js";
@@ -70,6 +70,13 @@ async function initConfig(file: string, force: boolean): Promise<void> {
   await mkdir(path.dirname(absolute), { recursive: true });
   await writeFile(absolute, `${JSON.stringify(defaultConfig, null, 2)}\n`, "utf8");
   process.stdout.write(`Created ${absolute}\n`);
+}
+
+async function validateConfig(file: string): Promise<void> {
+  const { path: absolute, transitionCount: transitions } = await validateConfigFile(file);
+  process.stdout.write(
+    `Valid RoutePlay config: ${absolute} (${transitions} transition${transitions === 1 ? "" : "s"})\n`,
+  );
 }
 
 async function doctor(configPath?: string): Promise<void> {
@@ -138,6 +145,12 @@ export async function main(argv = process.argv): Promise<void> {
     .argument("[path]", "output path", "routeplay.config.json")
     .option("--force", "replace an existing file", false)
     .action(async (file: string, options: { force: boolean }) => initConfig(file, options.force));
+
+  program
+    .command("validate")
+    .description("Validate a config without launching Chromium")
+    .argument("[path]", "config path", "routeplay.config.json")
+    .action(validateConfig);
 
   program
     .command("doctor")
