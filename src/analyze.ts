@@ -5,6 +5,7 @@ import type {
   Comparison,
   Finding,
   NavigationMode,
+  Phase,
   RuntimeEvent,
   SemanticSnapshot,
   TransitionSpec,
@@ -122,6 +123,180 @@ function compareSnapshots(
       hint: "Links introduced only by JavaScript are absent from the server surface.",
     });
   }
+}
+
+const surfaceNames: Record<Phase, string> = {
+  server: "server HTML",
+  cold: "the cold load",
+  transition: "in-app navigation",
+};
+
+function humanList(values: string[]): string {
+  if (values.length === 1) return values[0] ?? "";
+  if (values.length === 2) return `${values[0]} and ${values[1]}`;
+  return `${values.slice(0, -1).join(", ")}, and ${values.at(-1)}`;
+}
+
+function contractFinding(
+  ruleId: string,
+  problem: string,
+  expected: unknown,
+  mismatches: Partial<Record<Phase, unknown>>,
+): Finding | undefined {
+  const entries = Object.entries(mismatches) as Array<[Phase, unknown]>;
+  if (entries.length === 0) return undefined;
+  const phases = entries.map(([phase]) => phase);
+  return {
+    ruleId,
+    severity: "error",
+    ...(phases.length === 1 ? { phase: phases[0] } : {}),
+    message: `${problem} ${humanList(phases.map((phase) => surfaceNames[phase]))}.`,
+    expected,
+    actual: entries.length === 1 ? entries[0]?.[1] : Object.fromEntries(entries),
+  };
+}
+
+function exactContractFinding(
+  ruleId: string,
+  label: string,
+  expected: unknown,
+  surfaces: Array<[Phase, SemanticSnapshot]>,
+  select: (snapshot: SemanticSnapshot) => unknown,
+): Finding | undefined {
+  const mismatches: Partial<Record<Phase, unknown>> = {};
+  for (const [phase, snapshot] of surfaces) {
+    const actual = select(snapshot);
+    if (stable(expected) !== stable(actual)) mismatches[phase] = actual;
+  }
+  return contractFinding(
+    ruleId,
+    `${label} does not match the route contract for`,
+    expected,
+    mismatches,
+  );
+}
+
+function inclusionContractFinding(
+  ruleId: string,
+  label: string,
+  required: string[],
+  surfaces: Array<[Phase, SemanticSnapshot]>,
+  select: (snapshot: SemanticSnapshot) => string[],
+  includeFound = false,
+): Finding | undefined {
+  const mismatches: Partial<Record<Phase, unknown>> = {};
+  for (const [phase, snapshot] of surfaces) {
+    const actual = select(snapshot);
+    const actualSet = new Set(actual);
+    const missing = required.filter((value) => !actualSet.has(value));
+    if (missing.length > 0) {
+      mismatches[phase] = { missing, ...(includeFound ? { found: actual } : {}) };
+    }
+  }
+  return contractFinding(
+    ruleId,
+    `${label} ${required.length === 1 ? "is" : "are"} missing from`,
+    { includes: required },
+    mismatches,
+  );
+}
+
+function routeContractFindings(
+  spec: TransitionSpec,
+  server: Capture,
+  cold: Capture,
+  transition: Capture,
+): Finding[] {
+  const contract = spec.expect;
+  if (!contract) return [];
+  const surfaces: Array<[Phase, SemanticSnapshot]> = [
+    ["server", server.semantic],
+    ["cold", cold.semantic],
+    ["transition", transition.semantic],
+  ];
+  const findings: Finding[] = [];
+  const add = (finding: Finding | undefined): void => {
+    if (finding) findings.push(finding);
+  };
+
+  if (contract.title !== undefined) {
+    add(
+      exactContractFinding("RP301", "Title", [contract.title], surfaces, (value) => value.titles),
+    );
+  }
+  if (contract.description !== undefined) {
+    add(
+      exactContractFinding(
+        "RP302",
+        "Meta description",
+        [contract.description],
+        surfaces,
+        (value) => value.descriptions,
+      ),
+    );
+  }
+  if (contract.canonical !== undefined) {
+    add(
+      exactContractFinding(
+        "RP303",
+        "Canonical URL",
+        [contract.canonical],
+        surfaces,
+        (value) => value.canonicals,
+      ),
+    );
+  }
+  if (contract.h1 !== undefined) {
+    add(exactContractFinding("RP304", "H1 content", contract.h1, surfaces, (value) => value.h1));
+  }
+  if (contract.robots !== undefined) {
+    const agents = Object.keys(contract.robots);
+    add(
+      exactContractFinding("RP305", "Robots directives", contract.robots, surfaces, (value) =>
+        Object.fromEntries(agents.map((agent) => [agent, value.robots[agent] ?? []])),
+      ),
+    );
+  }
+  if (contract.jsonLdTypesInclude !== undefined) {
+    add(
+      inclusionContractFinding(
+        "RP306",
+        "Required JSON-LD type",
+        contract.jsonLdTypesInclude,
+        surfaces,
+        (value) => value.jsonLdTypes,
+        true,
+      ),
+    );
+  }
+  if (contract.mainTextIncludes !== undefined) {
+    const required = contract.mainTextIncludes;
+    const mismatches: Partial<Record<Phase, unknown>> = {};
+    for (const [phase, snapshot] of surfaces) {
+      const missing = required.filter((fragment) => !snapshot.main.text.includes(fragment));
+      if (missing.length > 0) mismatches[phase] = { missing };
+    }
+    add(
+      contractFinding(
+        "RP307",
+        `Required main-content ${required.length === 1 ? "text is" : "text fragments are"} missing from`,
+        { includes: required },
+        mismatches,
+      ),
+    );
+  }
+  if (contract.linksInclude !== undefined) {
+    add(
+      inclusionContractFinding(
+        "RP308",
+        "Required crawlable link",
+        contract.linksInclude,
+        surfaces,
+        (value) => value.links,
+      ),
+    );
+  }
+  return findings;
 }
 
 function runtimeFindings(events: RuntimeEvent[], phase: "cold" | "transition"): Finding[] {
@@ -245,6 +420,8 @@ export function analyzeCaptures(
       },
     });
   }
+
+  findings.push(...routeContractFindings(spec, server, cold, transition));
 
   compareSnapshots(findings, "server-cold", server.semantic, cold.semantic, settings);
   compareSnapshots(findings, "cold-transition", cold.semantic, transition.semantic, settings);

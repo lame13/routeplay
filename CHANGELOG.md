@@ -4,6 +4,13 @@ All notable changes to RoutePlay are documented here. The project follows Semant
 
 ## Unreleased
 
+## 0.3.0 - 2026-09-04
+
+### Added
+
+- Added optional per-transition route contracts for exact title, description, canonical, H1, and robots expectations across server HTML, cold loads, and in-app navigation.
+- Added required JSON-LD type, main-content text, and crawlable-link checks with compact per-surface evidence in every report format.
+
 ## 0.2.0 - 2026-08-28
 
 ### Added

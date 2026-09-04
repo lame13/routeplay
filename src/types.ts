@@ -3,6 +3,17 @@ export type Phase = "server" | "cold" | "transition";
 export type Comparison = "server-cold" | "cold-transition";
 export type NavigationMode = "client" | "document" | "unknown";
 
+export interface RouteExpectations {
+  title?: string | undefined;
+  description?: string | undefined;
+  canonical?: string | undefined;
+  h1?: string[] | undefined;
+  robots?: Record<string, string[]> | undefined;
+  jsonLdTypesInclude?: string[] | undefined;
+  mainTextIncludes?: string[] | undefined;
+  linksInclude?: string[] | undefined;
+}
+
 export interface TransitionSpec {
   name: string;
   from: string;
@@ -14,6 +25,7 @@ export interface TransitionSpec {
   readySelector?: string | undefined;
   expectedStatus: number;
   requireClientNavigation: boolean;
+  expect?: RouteExpectations | undefined;
 }
 
 export interface BrowserSettings {

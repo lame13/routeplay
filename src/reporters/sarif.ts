@@ -23,6 +23,14 @@ const descriptions: Record<string, string> = {
   RP202: "The page wrote an error to the browser console.",
   RP203: "A browser request failed at the network layer.",
   RP204: "A route or required browser request returned an HTTP error.",
+  RP301: "Document title does not match the configured route contract.",
+  RP302: "Meta description does not match the configured route contract.",
+  RP303: "Canonical URL does not match the configured route contract.",
+  RP304: "H1 content does not match the configured route contract.",
+  RP305: "Robots directives do not match the configured route contract.",
+  RP306: "A required JSON-LD type is missing.",
+  RP307: "Required text is missing from the route's main content.",
+  RP308: "A required crawlable internal link is missing.",
 };
 
 function resultFor(finding: Finding, uri: string): object {

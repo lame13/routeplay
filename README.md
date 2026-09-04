@@ -12,7 +12,7 @@ RoutePlay captures three semantic surfaces for every configured route transition
 2. the settled DOM after a cold direct load in Chromium;
 3. the settled DOM after clicking a real in-app `<a href>` from another route.
 
-It then compares route identity, SEO metadata, primary content, crawlable links, structured data, navigation mode, and browser failures. It is deliberately not a crawler, Lighthouse wrapper, or generic SEO score.
+It then compares route identity, SEO metadata, primary content, crawlable links, structured data, navigation mode, and browser failures. Optional route contracts can also require specific content on all three surfaces. RoutePlay is deliberately not a crawler, Lighthouse wrapper, or generic SEO score.
 
 ## Why this exists
 
@@ -25,6 +25,7 @@ SSR regressions often hide behind a working client router:
 - a browser-only global crashes the direct render path;
 - an internal link is visually clickable but has no crawlable `href`;
 - a destination link exists only after JavaScript and is absent from the source page;
+- every surface agrees on the same wrong title, canonical, heading, or critical copy;
 - an Astro page unexpectedly performs a document navigation, or a `ClientRouter` swap keeps stale state.
 
 RoutePlay turns those into repeatable CI evidence instead of a manual “view source, click around, refresh” ritual.
@@ -73,7 +74,14 @@ Edit `routeplay.config.json`:
       "readySelector": "main h1",
       "ignoreSelectors": ["time", "[data-live-price]"],
       "expectedStatus": 200,
-      "requireClientNavigation": true
+      "requireClientNavigation": true,
+      "expect": {
+        "title": "Pricing | Example",
+        "canonical": "/pricing/",
+        "h1": ["Pricing"],
+        "mainTextIncludes": ["Choose a plan"],
+        "linksInclude": ["/signup/"]
+      }
     }
   ]
 }
@@ -116,6 +124,7 @@ npx routeplay check \
 | JSON-LD block fingerprints / invalid JSON | Warning | Error / warning |
 | Page, console, request, and HTTP failures | Captured | Captured |
 | Client vs document navigation | — | Evidence or required contract |
+| Explicit route contract | Error | Error |
 
 Server/cold mismatches are warnings by default because client enhancement can be intentional. Cold/transition mismatches are errors because the same destination has two browser-visible states. Use `"failOn": "warning"` for a strict SSR gate.
 
@@ -132,6 +141,7 @@ The full JSON Schema is [routeplay.schema.json](routeplay.schema.json). Useful c
 - `readySelector`: an element that must exist before semantic stabilization begins.
 - `expectedStatus`: expected direct response status, default `200`.
 - `requireClientNavigation`: fail when the click causes a document navigation.
+- `expect`: values that must be present in the server response, cold load, and in-app result.
 - `browser.timeoutMs`: bounded navigation/readiness timeout, default `20000`.
 - `browser.settleMs`: time the semantic signature must remain unchanged, default `500`.
 - `compare.minTextSimilarity`: word-shingle Dice threshold, default `0.98`.
@@ -139,6 +149,33 @@ The full JSON Schema is [routeplay.schema.json](routeplay.schema.json). Useful c
 - `failOn`: `error`, `warning`, or `never`.
 
 RoutePlay never uses `networkidle`. It waits for DOM content, an optional readiness selector, and a bounded stable semantic signature, so analytics and long-lived requests cannot hang a run.
+
+## Route contracts
+
+Parity alone cannot catch a mistake shared by every surface. A route contract states what the destination must contain:
+
+```json
+{
+  "from": "/products/",
+  "to": "/products/widget/",
+  "expect": {
+    "title": "Widget | Example",
+    "description": "See Widget features, specifications, and pricing.",
+    "canonical": "/products/widget/",
+    "h1": ["Widget"],
+    "robots": {
+      "robots": ["follow", "index"]
+    },
+    "jsonLdTypesInclude": ["Product"],
+    "mainTextIncludes": ["Widget specifications", "Start free"],
+    "linksInclude": ["/signup/", "/support/widget/"]
+  }
+}
+```
+
+`title`, `description`, `canonical`, and `h1` are exact. Exact title, description, and canonical checks also catch duplicate elements. Each configured robots user agent must have exactly the listed directives; other user agents are left alone. `jsonLdTypesInclude`, `mainTextIncludes`, and `linksInclude` require those values without forbidding additional content.
+
+Text uses the same whitespace normalization as captured pages and remains case-sensitive. Relative canonical and link values resolve against `baseUrl`; fragments are ignored for required links because crawlable-link comparison ignores them too. Contract failures are errors and identify the affected surface or surfaces. Explicit `linksInclude` checks still run when `compare.compareLinks` is `false`.
 
 ## Protected previews
 
