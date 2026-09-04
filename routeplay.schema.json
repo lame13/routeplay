@@ -25,7 +25,48 @@
           "ignoreSelectors": { "type": "array", "items": { "type": "string", "minLength": 1 } },
           "readySelector": { "type": "string", "minLength": 1 },
           "expectedStatus": { "type": "integer", "minimum": 100, "maximum": 599, "default": 200 },
-          "requireClientNavigation": { "type": "boolean", "default": false }
+          "requireClientNavigation": { "type": "boolean", "default": false },
+          "expect": {
+            "type": "object",
+            "description": "Semantic values that must hold in server HTML, a cold load, and in-app navigation.",
+            "additionalProperties": false,
+            "minProperties": 1,
+            "properties": {
+              "title": { "type": "string", "minLength": 1 },
+              "description": { "type": "string", "minLength": 1 },
+              "canonical": { "type": "string", "minLength": 1 },
+              "h1": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "type": "string", "minLength": 1 }
+              },
+              "robots": {
+                "type": "object",
+                "minProperties": 1,
+                "propertyNames": { "minLength": 1 },
+                "additionalProperties": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": { "type": "string", "minLength": 1 }
+                }
+              },
+              "jsonLdTypesInclude": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "type": "string", "minLength": 1 }
+              },
+              "mainTextIncludes": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "type": "string", "minLength": 1 }
+              },
+              "linksInclude": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "type": "string", "minLength": 1 }
+              }
+            }
+          }
         }
       }
     },

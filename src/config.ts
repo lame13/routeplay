@@ -1,7 +1,31 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import type { CheckOptions, RoutePlayConfig } from "./types.js";
+import { normalizeText } from "./similarity.js";
+import type { CheckOptions, RouteExpectations, RoutePlayConfig } from "./types.js";
+
+const expectedText = z.string().trim().min(1);
+
+const routeExpectationsSchema = z
+  .object({
+    title: expectedText.optional(),
+    description: expectedText.optional(),
+    canonical: expectedText.optional(),
+    h1: z.array(expectedText).min(1).optional(),
+    robots: z
+      .record(expectedText, z.array(expectedText).min(1))
+      .refine((value) => Object.keys(value).length > 0, {
+        message: "Add at least one robots user agent.",
+      })
+      .optional(),
+    jsonLdTypesInclude: z.array(expectedText).min(1).optional(),
+    mainTextIncludes: z.array(expectedText).min(1).optional(),
+    linksInclude: z.array(expectedText).min(1).optional(),
+  })
+  .strict()
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "Add at least one route expectation.",
+  });
 
 const transitionSchema = z
   .object({
@@ -15,6 +39,7 @@ const transitionSchema = z
     readySelector: z.string().trim().min(1).optional(),
     expectedStatus: z.number().int().min(100).max(599).default(200),
     requireClientNavigation: z.boolean().default(false),
+    expect: routeExpectationsSchema.optional(),
   })
   .strict();
 
@@ -89,6 +114,63 @@ export function normalizeUrl(baseUrl: string, value: string): string {
   return url.href;
 }
 
+function unique(values: string[]): string[] {
+  return [...new Set(values)];
+}
+
+function normalizeRobots(value: Record<string, string[]>): Record<string, string[]> {
+  const normalized = new Map<string, string[]>();
+  for (const [name, directives] of Object.entries(value)) {
+    const key = normalizeText(name).toLocaleLowerCase();
+    const current = normalized.get(key) ?? [];
+    normalized.set(
+      key,
+      unique([
+        ...current,
+        ...directives.map((directive) => normalizeText(directive).toLocaleLowerCase()),
+      ]).sort((left, right) => left.localeCompare(right)),
+    );
+  }
+  return Object.fromEntries(
+    [...normalized.entries()].sort(([left], [right]) => left.localeCompare(right)),
+  );
+}
+
+function normalizeRequiredLink(baseUrl: string, value: string): string {
+  const url = new URL(normalizeUrl(baseUrl, value));
+  url.hash = "";
+  return url.href;
+}
+
+function normalizeExpectations(value: RouteExpectations, baseUrl: string): RouteExpectations {
+  return {
+    ...(value.title === undefined ? {} : { title: normalizeText(value.title) }),
+    ...(value.description === undefined ? {} : { description: normalizeText(value.description) }),
+    ...(value.canonical === undefined ? {} : { canonical: normalizeUrl(baseUrl, value.canonical) }),
+    ...(value.h1 === undefined ? {} : { h1: value.h1.map((heading) => normalizeText(heading)) }),
+    ...(value.robots === undefined ? {} : { robots: normalizeRobots(value.robots) }),
+    ...(value.jsonLdTypesInclude === undefined
+      ? {}
+      : {
+          jsonLdTypesInclude: unique(value.jsonLdTypesInclude.map((type) => normalizeText(type))),
+        }),
+    ...(value.mainTextIncludes === undefined
+      ? {}
+      : {
+          mainTextIncludes: unique(
+            value.mainTextIncludes.map((fragment) => normalizeText(fragment)),
+          ),
+        }),
+    ...(value.linksInclude === undefined
+      ? {}
+      : {
+          linksInclude: unique(
+            value.linksInclude.map((link) => normalizeRequiredLink(baseUrl, link)),
+          ),
+        }),
+  };
+}
+
 export async function loadConfig(options: CheckOptions): Promise<RoutePlayConfig> {
   let input: unknown;
   if (options.configPath) {
@@ -140,6 +222,7 @@ export async function loadConfig(options: CheckOptions): Promise<RoutePlayConfig
     from: normalizeUrl(baseUrl, transition.from),
     to: normalizeUrl(baseUrl, transition.to),
     expectedFinalUrl: normalizeUrl(baseUrl, transition.expectedFinalUrl ?? transition.to),
+    ...(transition.expect ? { expect: normalizeExpectations(transition.expect, baseUrl) } : {}),
   }));
 
   const baseOrigin = new URL(baseUrl).origin;
@@ -157,6 +240,13 @@ export async function loadConfig(options: CheckOptions): Promise<RoutePlayConfig
       throw new Error(
         `${transition.name} must stay on the configured baseUrl origin ${baseOrigin}.`,
       );
+    }
+    for (const link of transition.expect?.linksInclude ?? []) {
+      if (new URL(link).origin !== baseOrigin) {
+        throw new Error(
+          `${transition.name} expect.linksInclude must stay on the configured baseUrl origin ${baseOrigin}.`,
+        );
+      }
     }
   }
 
@@ -187,6 +277,12 @@ export const defaultConfig = {
       to: "/about/",
       selector: "a[href='/about/']",
       requireClientNavigation: false,
+      expect: {
+        title: "About",
+        canonical: "/about/",
+        h1: ["About"],
+        mainTextIncludes: ["About"],
+      },
     },
   ],
   browser: {

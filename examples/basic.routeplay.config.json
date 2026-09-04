@@ -12,7 +12,15 @@
       "ignoreSelectors": ["[data-live-price]", "time"],
       "readySelector": "main h1",
       "expectedStatus": 200,
-      "requireClientNavigation": true
+      "requireClientNavigation": true,
+      "expect": {
+        "title": "Product | Example",
+        "canonical": "/product/",
+        "h1": ["Product"],
+        "jsonLdTypesInclude": ["Product"],
+        "mainTextIncludes": ["Product details"],
+        "linksInclude": ["/checkout/"]
+      }
     }
   ],
   "browser": {

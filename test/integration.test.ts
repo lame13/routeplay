@@ -41,12 +41,35 @@ describe("browser integration", () => {
     const transition = config.transitions[0];
     if (!transition) throw new Error("Expected one configured transition.");
     transition.requireClientNavigation = true;
+    transition.expect = {
+      title: "Good",
+      description: "Fixture Good",
+      canonical: `${baseUrl}/good/`,
+      h1: ["Good"],
+      robots: { robots: ["follow", "index"] },
+      mainTextIncludes: ["complete stable content"],
+      linksInclude: [`${baseUrl}/`],
+    };
     const report = await runRoutePlay(config, browser);
     expect(report.results[0]?.complete).toBe(true);
     expect(report.results[0]?.navigation.mode).toBe("client");
     expect(report.summary.errors).toBe(0);
     expect(report.passed).toBe(true);
     expect(JSON.stringify(report)).not.toContain("super-secret-preview-value");
+  });
+
+  it("fails a wrong route contract even when every surface agrees", async () => {
+    const config = await loadConfig({ baseUrl, from: "/", to: "/good/" });
+    const transition = config.transitions[0];
+    if (!transition) throw new Error("Expected one configured transition.");
+    transition.expect = { title: "Pricing" };
+    const report = await runRoutePlay(config, browser);
+
+    expect(report.results[0]?.complete).toBe(true);
+    expect(report.results[0]?.findings).toContainEqual(
+      expect.objectContaining({ ruleId: "RP301", severity: "error" }),
+    );
+    expect(report.passed).toBe(false);
   });
 
   it("detects hydrated-only source content", async () => {

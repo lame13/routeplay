@@ -9,6 +9,7 @@ export type {
   Finding,
   HttpEvidence,
   NavigationMode,
+  RouteExpectations,
   RoutePlayConfig,
   RoutePlayReport,
   RuntimeEvent,
