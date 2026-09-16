@@ -7,6 +7,16 @@ export interface ExtractOptions {
   ignoreSelectors?: string[] | undefined;
 }
 
+export const ignoredMainSelectors = [
+  "script",
+  "style",
+  "template",
+  "noscript",
+  "svg",
+  "[hidden]",
+  '[aria-hidden="true"]',
+] as const;
+
 function uniqueSorted(values: string[]): string[] {
   return [...new Set(values.filter(Boolean))].sort((left, right) => left.localeCompare(right));
 }
@@ -93,20 +103,7 @@ export function extractSemantics(
   const requestedMain = options.mainSelector ?? "main";
   const selector = $(requestedMain).length > 0 ? requestedMain : "body";
   const main = $(selector).first().clone();
-  main
-    .find(
-      [
-        "script",
-        "style",
-        "template",
-        "noscript",
-        "svg",
-        "[hidden]",
-        '[aria-hidden="true"]',
-        ...(options.ignoreSelectors ?? []),
-      ].join(","),
-    )
-    .remove();
+  main.find([...ignoredMainSelectors, ...(options.ignoreSelectors ?? [])].join(",")).remove();
   const mainText = normalizeText(main.text());
 
   const linkValues: string[] = [];

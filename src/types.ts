@@ -50,6 +50,9 @@ export interface RoutePlayConfig {
   compare: CompareSettings;
   headers: Record<string, string>;
   failOn: "error" | "warning" | "never";
+  concurrency: number;
+  retries: number;
+  artifacts?: string | undefined;
 }
 
 export interface SemanticSnapshot {
@@ -125,6 +128,8 @@ export interface TransitionResult {
   };
   findings: Finding[];
   durationMs: number;
+  attempts: number;
+  artifacts?: Record<string, string> | undefined;
   complete: boolean;
 }
 
@@ -152,6 +157,7 @@ export interface RoutePlayReport {
     viewport: { width: number; height: number };
   };
   policy: { failOn: RoutePlayConfig["failOn"] };
+  run: { concurrency: number; retries: number };
   results: TransitionResult[];
   summary: RunSummary;
   passed: boolean;
@@ -165,6 +171,9 @@ export interface CheckOptions {
   selector?: string;
   headers?: string[];
   failOn?: RoutePlayConfig["failOn"];
+  concurrency?: number;
+  retries?: number;
+  artifacts?: string;
   format?: "terminal" | "json" | "html" | "sarif";
   output?: string;
 }

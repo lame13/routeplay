@@ -97,6 +97,7 @@ Run it:
 
 ```bash
 npx routeplay check
+npx routeplay check --artifacts routeplay-artifacts
 npx routeplay check --format html --output routeplay-report.html
 npx routeplay check --format json --output routeplay-report.json
 npx routeplay check --format sarif --output routeplay.sarif
@@ -147,6 +148,9 @@ The full JSON Schema is [routeplay.schema.json](routeplay.schema.json). Useful c
 - `compare.minTextSimilarity`: word-shingle Dice threshold, default `0.98`.
 - `compare.minSourceTextLength`: warning threshold for thin server content, default `80`.
 - `failOn`: `error`, `warning`, or `never`.
+- `concurrency`: transitions captured at once, from `1` to `8`, default `1`. Override with `--concurrency`. Every transition still gets its own clean browser contexts.
+- `retries`: extra attempts for a transition that is incomplete or still violates the configured policy, from `0` to `3`, default `0`. Override with `--retries`.
+- `artifacts`: directory for failure evidence. The `--artifacts` flag overrides it for one run.
 
 RoutePlay never uses `networkidle`. It waits for DOM content, an optional readiness selector, and a bounded stable semantic signature, so analytics and long-lived requests cannot hang a run.
 
@@ -201,6 +205,32 @@ npx routeplay check --config routeplay.config.json \
 
 Environment-backed config is safer in CI because command arguments may be visible to other processes.
 
+## Failure artifacts
+
+Text evidence rarely explains a browser-only regression on its own. Point RoutePlay at a directory and it writes what it saw for the transitions that failed:
+
+```bash
+npx routeplay check --artifacts routeplay-artifacts
+```
+
+```text
+routeplay-artifacts/
+└── 01-home-to-pricing/
+    ├── cold.png         settled destination after a direct load
+    ├── cold.html        settled DOM after a direct load
+    ├── source.png       source page, when loading it or clicking failed
+    ├── source.html
+    ├── transition.png   settled destination after the in-app click
+    ├── transition.html
+    └── runtime.json     console, page, request, and HTTP evidence per surface
+```
+
+Screenshots and DOM are collected while transitions run but written only for the final failing attempt of a transition that fails or stays incomplete. Passing transitions leave the directory untouched, and retried failures report the attempt they kept. Directory names are prefixed with the configured transition index, so two transitions with the same name never collide.
+
+Reusing a directory replaces that failing transition's previous evidence files. DOM and screenshots are best effort when navigation fails before a document is available; runtime evidence still records request failures. Transition durations include every retry attempt.
+
+Artifact HTML and JSON reuse report redaction, so reflected preview credentials become `[REDACTED]`. Screenshots are pixels and cannot be redacted: do not publish artifacts from pages that render secrets. The JSON and HTML reports list the written files under `results[].artifacts`, relative to the artifacts directory.
+
 ## Framework behavior
 
 RoutePlay is framework-neutral at the HTTP/browser boundary and is designed for these route behaviors:
@@ -228,7 +258,7 @@ An incomplete transition is never reported as a pass.
 
 ## CI
 
-Copy [examples/github-actions.yml](examples/github-actions.yml) into the audited project's `.github/workflows/` directory and commit its `routeplay.config.json`. Reports can be uploaded as artifacts or SARIF.
+Copy [examples/github-actions.yml](examples/github-actions.yml) into the audited project's `.github/workflows/` directory and commit its `routeplay.config.json`. Reports can be uploaded as artifacts or SARIF, and `--artifacts routeplay-artifacts` keeps screenshots, DOM, and runtime events available for the failed run.
 
 This repository's own CI tests Node.js 22 and 24, runs real Chromium against synthetic SSR/SPA failure fixtures, builds the Docker image and package, and validates the npm tarball. It does not claim framework-internal integration coverage.
 

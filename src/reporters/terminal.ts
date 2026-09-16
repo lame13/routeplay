@@ -1,5 +1,5 @@
 import pc from "picocolors";
-import { severityFails } from "../run.js";
+import { severityFails } from "../policy.js";
 import type { Finding, RoutePlayReport } from "../types.js";
 
 function mark(finding: Finding): string {
@@ -25,7 +25,8 @@ export function terminalReport(report: RoutePlayReport): string {
       !result.complete ||
       result.findings.some((finding) => severityFails(finding.severity, report.policy.failOn));
     lines.push(`${failed ? pc.red("✗") : pc.green("✓")} ${pc.bold(result.name)}`);
-    lines.push(`  ${result.from} → ${result.to} · ${result.navigation.mode}`);
+    const attempts = result.attempts > 1 ? ` · ${result.attempts} attempts` : "";
+    lines.push(`  ${result.from} → ${result.to} · ${result.navigation.mode}${attempts}`);
     for (const finding of result.findings) {
       if (finding.severity === "info" && finding.ruleId === "RP004") continue;
       lines.push(`  ${mark(finding)} ${finding.ruleId} ${finding.message}`);
@@ -33,6 +34,9 @@ export function terminalReport(report: RoutePlayReport): string {
         lines.push(`        expected: ${value(finding.expected)}`);
       if (finding.actual !== undefined) lines.push(`        actual:   ${value(finding.actual)}`);
       if (finding.hint) lines.push(`        hint:     ${finding.hint}`);
+    }
+    for (const [name, artifact] of Object.entries(result.artifacts ?? {})) {
+      lines.push(`        artifact: ${name} → ${artifact}`);
     }
     lines.push("");
   }

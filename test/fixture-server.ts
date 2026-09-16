@@ -29,6 +29,7 @@ export async function startFixtureServer(): Promise<{
   crossOriginAuthorizations: () => Array<string | undefined>;
 }> {
   let leakedRequests = 0;
+  let retryOnceHits = 0;
   const crossOriginAuthorizations: Array<string | undefined> = [];
   const crossOriginServer = createServer((request, response) => {
     leakedRequests += 1;
@@ -50,8 +51,41 @@ export async function startFixtureServer(): Promise<{
         shell(
           "Home",
           "/",
-          '<h1>Home</h1><p>Choose a synthetic route for parity testing.</p><a href="/good/">Good</a><a href="/thin/">Thin</a><a href="/stale/">Stale</a><a href="/missing/">Missing</a><a href="/redirect-ok">Normalized redirect</a><a href="/redirect-wrong/">Wrong redirect</a><a href="/runtime/">Runtime failure</a><a href="/reflect/">Reflect</a><a href="/cross-origin/">Cross origin</a>',
+          '<h1>Home</h1><p>Choose a synthetic route for parity testing.</p><a href="/good/">Good</a><a href="/thin/">Thin</a><a href="/stale/">Stale</a><a href="/missing/">Missing</a><a href="/redirect-ok">Normalized redirect</a><a href="/redirect-wrong/">Wrong redirect</a><a href="/runtime/">Runtime failure</a><a href="/reflect/">Reflect</a><a href="/cross-origin/">Cross origin</a><a href="/retry-once/">Retry once</a><a href="/never-stable/">Never stable</a>',
           clientRouter,
+        ),
+      );
+      return;
+    }
+    if (pathname === "/retry-once/") {
+      retryOnceHits += 1;
+      if (retryOnceHits === 1) {
+        response.end(
+          shell(
+            "Retry",
+            "/retry-once/",
+            '<h1>Retry</h1><p>This document never stabilizes on its first request.</p><div id="churn"></div>',
+            "<script>setInterval(() => { document.querySelector('#churn').textContent += 'x' }, 50)</script>",
+          ),
+        );
+        return;
+      }
+      response.end(
+        shell(
+          "Retry",
+          "/retry-once/",
+          '<h1>Retry</h1><p>This route stabilizes on every later request so a retry can succeed.</p><a href="/">Home</a>',
+        ),
+      );
+      return;
+    }
+    if (pathname === "/never-stable/") {
+      response.end(
+        shell(
+          "Churn",
+          "/never-stable/",
+          '<h1>Churn</h1><p>This document intentionally never reaches semantic stability.</p><div id="churn"></div>',
+          "<script>setInterval(() => { document.querySelector('#churn').textContent += 'x' }, 50)</script>",
         ),
       );
       return;
@@ -64,6 +98,26 @@ export async function startFixtureServer(): Promise<{
           '<h1>Good</h1><p>This is complete stable content for the good route and it is present everywhere.</p><a href="/">Home</a>',
         ),
       );
+      return;
+    }
+    if (pathname === "/custom-element/") {
+      response.end(
+        shell(
+          "Custom element",
+          "/custom-element/",
+          '<h1>Custom element</h1><fixture-element>Stable content</fixture-element><a href="/custom-element/">Self</a>',
+          `<script>
+            let constructions = 0;
+            customElements.define('fixture-element', class extends HTMLElement {
+              constructor() { super(); document.title = 'Constructed ' + ++constructions; }
+            });
+          </script>`,
+        ),
+      );
+      return;
+    }
+    if (pathname === "/connection-failure/") {
+      request.socket.destroy();
       return;
     }
     if (pathname === "/thin/") {
@@ -142,12 +196,16 @@ export async function startFixtureServer(): Promise<{
       return;
     }
     if (pathname === "/reflect/") {
-      const reflected = request.headers.authorization ?? "none";
+      const reflected = (request.headers.authorization ?? "none")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
       response.end(
         shell(
           "Reflect",
           "/reflect/",
-          `<h1>Reflect</h1><p>Credential reflection fixture: ${reflected}</p><a href="/">Home</a>`,
+          `<h1>Reflect</h1><p data-reflected="${reflected}">Credential reflection fixture: ${reflected}</p><a href="/">Home</a>`,
         ),
       );
       return;
