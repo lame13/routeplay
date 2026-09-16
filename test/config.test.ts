@@ -192,6 +192,58 @@ describe("loadConfig", () => {
       transitionCount: 2,
     });
   });
+
+  it("applies run defaults and accepts concurrency, retry, and artifact settings", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "routeplay-config-"));
+    const file = path.join(directory, "routeplay.config.json");
+    await writeFile(
+      file,
+      JSON.stringify({
+        baseUrl: "https://example.test",
+        concurrency: 4,
+        retries: 2,
+        artifacts: "reports/routeplay-artifacts",
+        transitions: [{ from: "/", to: "/about" }],
+      }),
+    );
+    const config = await loadConfig({ configPath: file });
+    expect(config.concurrency).toBe(4);
+    expect(config.retries).toBe(2);
+    expect(config.artifacts).toBe("reports/routeplay-artifacts");
+
+    const defaults = await loadConfig({
+      baseUrl: "https://example.test",
+      from: "/",
+      to: "/about",
+    });
+    expect(defaults.concurrency).toBe(1);
+    expect(defaults.retries).toBe(0);
+    expect(defaults.artifacts).toBeUndefined();
+  });
+
+  it("lets CLI overrides retune a committed config and rejects out-of-range counts", async () => {
+    const override = await loadConfig({
+      baseUrl: "https://example.test",
+      from: "/",
+      to: "/about",
+      concurrency: 3,
+      retries: 1,
+      artifacts: "routeplay-artifacts",
+    });
+    expect(override.concurrency).toBe(3);
+    expect(override.retries).toBe(1);
+    expect(override.artifacts).toBe("routeplay-artifacts");
+
+    await expect(
+      loadConfig({ baseUrl: "https://example.test", from: "/", to: "/about", concurrency: 0 }),
+    ).rejects.toThrow("Concurrency must be an integer between 1 and 8.");
+    await expect(
+      loadConfig({ baseUrl: "https://example.test", from: "/", to: "/about", retries: 1.5 }),
+    ).rejects.toThrow("Retries must be an integer between 0 and 3.");
+    await expect(
+      loadConfig({ baseUrl: "https://example.test", from: "/", to: "/about", artifacts: "  " }),
+    ).rejects.toThrow("Artifacts directory must not be empty.");
+  });
 });
 
 describe("normalizeUrl", () => {

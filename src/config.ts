@@ -85,6 +85,9 @@ const configSchema = z
       .default({ minTextSimilarity: 0.98, minSourceTextLength: 80, compareLinks: true }),
     headers: z.record(z.string(), z.string()).default({}),
     failOn: z.enum(["error", "warning", "never"]).default("error"),
+    concurrency: z.number().int().min(1).max(8).default(1),
+    retries: z.number().int().min(0).max(3).default(0),
+    artifacts: z.string().trim().min(1).optional(),
   })
   .strict();
 
@@ -104,6 +107,19 @@ function parseHeader(raw: string): [string, string] {
     throw new Error(`Invalid --header value "${raw}". Use NAME=VALUE.`);
   }
   return [raw.slice(0, separator).trim(), raw.slice(separator + 1)];
+}
+
+function integerOverride(
+  value: number | undefined,
+  minimum: number,
+  maximum: number,
+  label: string,
+): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isInteger(value) || value < minimum || value > maximum) {
+    throw new Error(`${label} must be an integer between ${minimum} and ${maximum}.`);
+  }
+  return value;
 }
 
 export function normalizeUrl(baseUrl: string, value: string): string {
@@ -216,6 +232,11 @@ export async function loadConfig(options: CheckOptions): Promise<RoutePlayConfig
     ]),
   );
   const baseUrl = new URL(options.baseUrl ?? parsed.data.baseUrl).href;
+  const concurrency =
+    integerOverride(options.concurrency, 1, 8, "Concurrency") ?? parsed.data.concurrency;
+  const retries = integerOverride(options.retries, 0, 3, "Retries") ?? parsed.data.retries;
+  const artifacts = options.artifacts?.trim() ?? parsed.data.artifacts;
+  if (artifacts === "") throw new Error("Artifacts directory must not be empty.");
   const transitions = parsed.data.transitions.map((transition, index) => ({
     ...transition,
     name: transition.name ?? `Transition ${index + 1}`,
@@ -256,6 +277,9 @@ export async function loadConfig(options: CheckOptions): Promise<RoutePlayConfig
     transitions,
     headers,
     failOn: options.failOn ?? parsed.data.failOn,
+    concurrency,
+    retries,
+    ...(artifacts === undefined ? {} : { artifacts }),
   };
 }
 

@@ -18,6 +18,7 @@ const report: RoutePlayReport = {
     viewport: { width: 1440, height: 900 },
   },
   policy: { failOn: "error" },
+  run: { concurrency: 1, retries: 0 },
   results: [
     {
       name: "Unsafe <script>alert(1)</script>",
@@ -33,6 +34,8 @@ const report: RoutePlayReport = {
         },
       ],
       durationMs: 1000,
+      attempts: 2,
+      artifacts: { "cold.html": "01-unsafe/cold.html" },
       complete: true,
     },
   ],
@@ -59,5 +62,11 @@ describe("reporters", () => {
     };
     expect(parsed.version).toBe("2.1.0");
     expect(parsed.runs[0]?.results[0]?.ruleId).toBe("RP104");
+  });
+
+  it("surfaces retry counts and artifact paths", () => {
+    const html = htmlReport(report);
+    expect(html).toContain("2 attempts");
+    expect(html).toContain("01-unsafe/cold.html");
   });
 });

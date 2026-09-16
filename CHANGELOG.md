@@ -4,6 +4,24 @@ All notable changes to RoutePlay are documented here. The project follows Semant
 
 ## Unreleased
 
+## 0.4.0 - 2026-09-16
+
+### Added
+
+- Added optional failure artifacts with per-surface DOM, full-page screenshots, and runtime/HTTP evidence, using index-prefixed transition directories and retaining the final failing attempt.
+- Added configurable transition concurrency (`1`–`8`) and retries (`0`–`3`), with matching CLI flags and configured result order preserved.
+- Added run settings, attempt counts, and artifact paths to reports, plus failure artifact uploads in the CI example.
+
+### Changed
+
+- Replaced repeated HTML serialization and parsing during stability polling with an in-page semantic signature. Final report extraction remains unchanged, and sampling does not invoke custom-element constructors.
+- Transition durations include all retry attempts. Artifact write failures wait for active workers to finish before returning.
+
+### Fixed
+
+- Retained available evidence for early navigation failures, replaced stale files when reusing a failing transition's artifact directory, and kept passing runs from creating artifact directories.
+- Redacted HTML-escaped credentials in artifact text and rejected empty artifact directory overrides.
+
 ## 0.3.0 - 2026-09-04
 
 ### Added
