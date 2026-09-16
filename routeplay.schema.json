@@ -109,6 +109,25 @@
       "description": "Request headers applied only to the audited origin. Values may use ${ENV_VAR} placeholders.",
       "additionalProperties": { "type": "string" }
     },
-    "failOn": { "enum": ["error", "warning", "never"], "default": "error" }
+    "failOn": { "enum": ["error", "warning", "never"], "default": "error" },
+    "concurrency": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 8,
+      "default": 1,
+      "description": "How many transitions are captured at once. Each transition keeps clean browser contexts."
+    },
+    "retries": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 3,
+      "default": 0,
+      "description": "Extra attempts for a transition that is incomplete or still violates the configured policy."
+    },
+    "artifacts": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Directory where failure screenshots, settled DOM, and runtime events are written."
+    }
   }
 }

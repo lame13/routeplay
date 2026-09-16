@@ -17,9 +17,21 @@ function collect(value: string, previous: string[]): string[] {
   return [...previous, value];
 }
 
-interface CliCheckOptions extends Omit<CheckOptions, "configPath" | "headers"> {
+interface CliCheckOptions
+  extends Omit<CheckOptions, "configPath" | "headers" | "concurrency" | "retries"> {
   config?: string;
   header?: string[];
+  concurrency?: string;
+  retries?: string;
+}
+
+function countOption(value: string | undefined, label: string): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed)) {
+    throw new Error(`${label} expects a whole number, received "${value}".`);
+  }
+  return parsed;
 }
 
 async function fileExists(file: string): Promise<boolean> {
@@ -121,6 +133,9 @@ export async function main(argv = process.argv): Promise<void> {
     .option("--to <path-or-url>", "destination route for one-off mode")
     .option("--selector <css>", "exact anchor selector for one-off mode")
     .option("--header <name=value>", "origin-scoped request header; repeatable", collect, [])
+    .option("--concurrency <count>", "transitions to capture at once, 1-8")
+    .option("--retries <count>", "extra attempts for failing transitions, 0-3")
+    .option("--artifacts <dir>", "write screenshots, DOM, and runtime events for failures")
     .addOption(
       new Option("--fail-on <level>", "failure threshold").choices(["error", "warning", "never"]),
     )
@@ -131,11 +146,15 @@ export async function main(argv = process.argv): Promise<void> {
     )
     .option("-o, --output <path>", "write the report to a file")
     .action(async (options: CliCheckOptions) => {
-      const { config, header, ...rest } = options;
+      const { config, header, concurrency, retries, ...rest } = options;
+      const concurrencyCount = countOption(concurrency, "--concurrency");
+      const retryCount = countOption(retries, "--retries");
       await check({
         ...rest,
         ...(config ? { configPath: config } : {}),
         ...(header ? { headers: header } : {}),
+        ...(concurrencyCount === undefined ? {} : { concurrency: concurrencyCount }),
+        ...(retryCount === undefined ? {} : { retries: retryCount }),
       });
     });
 

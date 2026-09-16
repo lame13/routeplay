@@ -1,4 +1,4 @@
-import { severityFails } from "../run.js";
+import { severityFails } from "../policy.js";
 import type { Finding, RoutePlayReport } from "../types.js";
 
 function escapeHtml(value: unknown): string {
@@ -50,11 +50,18 @@ export function htmlReport(report: RoutePlayReport): string {
       const passed =
         result.complete &&
         !result.findings.some((finding) => severityFails(finding.severity, report.policy.failOn));
+      const artifacts = Object.entries(result.artifacts ?? {});
+      const artifactList =
+        artifacts.length === 0
+          ? ""
+          : `<div class="mode">Artifacts: ${artifacts
+              .map(([, target]) => `<code>${escapeHtml(target)}</code>`)
+              .join(" ")}</div>`;
       return `<section class="card">
         <header><div><h2>${escapeHtml(result.name)}</h2><div class="route">${escapeHtml(result.from)} → ${escapeHtml(result.to)}</div></div>
           <span class="result ${passed ? "pass" : "fail"}">${result.complete ? (passed ? "pass" : "fail") : "incomplete"}</span></header>
-        <div class="mode">Navigation: <b>${escapeHtml(result.navigation.mode)}</b> · ${(result.durationMs / 1000).toFixed(1)}s</div>
-        ${metrics}<ul>${findings || "<li class='empty'>No reportable differences.</li>"}</ul>
+        <div class="mode">Navigation: <b>${escapeHtml(result.navigation.mode)}</b> · ${(result.durationMs / 1000).toFixed(1)}s${result.attempts > 1 ? ` · ${result.attempts} attempts` : ""}</div>
+        ${metrics}${artifactList}<ul>${findings || "<li class='empty'>No reportable differences.</li>"}</ul>
       </section>`;
     })
     .join("\n");
