@@ -50,6 +50,33 @@ describe("extractSemantics", () => {
     expect(snapshot.jsonLdFingerprints).toHaveLength(2);
     expect(snapshot.jsonLdFingerprints[0]).toBe(snapshot.jsonLdFingerprints[1]);
   });
+
+  it("extracts the document language and resolved hreflang alternates", () => {
+    const snapshot = extractSemantics(
+      `<!doctype html><html lang=" TH-th "><head>
+        <link rel="alternate" hreflang="TH" href="/th/">
+        <link rel="alternate" hreflang="en" href="/en/">
+        <link rel="alternate" hreflang="x-default" href="https://example.test/">
+        <link rel="alternate" hreflang="en" href="/en/">
+        <link rel="stylesheet" href="/app.css">
+        <link rel="alternate" hreflang="fr" href="mailto:hello@example.test">
+      </head><body><main>Text</main></body></html>`,
+      "https://example.test/docs/",
+    );
+
+    expect(snapshot.lang).toBe("th-th");
+    expect(snapshot.hreflangs).toEqual([
+      { hreflang: "en", href: "https://example.test/en/" },
+      { hreflang: "th", href: "https://example.test/th/" },
+      { hreflang: "x-default", href: "https://example.test/" },
+    ]);
+  });
+
+  it("reports an unset document language as an empty string", () => {
+    const snapshot = extractSemantics("<title>Page</title>", "https://example.test/");
+    expect(snapshot.lang).toBe("");
+    expect(snapshot.hreflangs).toEqual([]);
+  });
 });
 
 describe("textSimilarity", () => {

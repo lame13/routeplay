@@ -1,7 +1,14 @@
 import { createServer, type Server } from "node:http";
 
-function shell(title: string, canonical: string, main: string, script = ""): string {
-  return `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title><meta name="description" content="Fixture ${title}"><meta name="robots" content="index,follow"><link rel="canonical" href="${canonical}"></head><body><main>${main}</main>${script}</body></html>`;
+function shell(
+  title: string,
+  canonical: string,
+  main: string,
+  script = "",
+  head = "",
+  lang = "en",
+): string {
+  return `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><title>${title}</title><meta name="description" content="Fixture ${title}"><meta name="robots" content="index,follow"><link rel="canonical" href="${canonical}">${head}</head><body><main>${main}</main>${script}</body></html>`;
 }
 
 const clientRouter = `<script>
@@ -30,6 +37,7 @@ export async function startFixtureServer(): Promise<{
 }> {
   let leakedRequests = 0;
   let retryOnceHits = 0;
+  let driftingHits = 0;
   const crossOriginAuthorizations: Array<string | undefined> = [];
   const crossOriginServer = createServer((request, response) => {
     leakedRequests += 1;
@@ -51,8 +59,86 @@ export async function startFixtureServer(): Promise<{
         shell(
           "Home",
           "/",
-          '<h1>Home</h1><p>Choose a synthetic route for parity testing.</p><a href="/good/">Good</a><a href="/thin/">Thin</a><a href="/stale/">Stale</a><a href="/missing/">Missing</a><a href="/redirect-ok">Normalized redirect</a><a href="/redirect-wrong/">Wrong redirect</a><a href="/runtime/">Runtime failure</a><a href="/reflect/">Reflect</a><a href="/cross-origin/">Cross origin</a><a href="/retry-once/">Retry once</a><a href="/never-stable/">Never stable</a>',
+          '<h1>Home</h1><p>Choose a synthetic route for parity testing.</p><a href="/good/">Good</a><a href="/thin/">Thin</a><a href="/stale/">Stale</a><a href="/missing/">Missing</a><a href="/redirect-ok">Normalized redirect</a><a href="/redirect-wrong/">Wrong redirect</a><a href="/runtime/">Runtime failure</a><a href="/reflect/">Reflect</a><a href="/cross-origin/">Cross origin</a><a href="/retry-once/">Retry once</a><a href="/never-stable/">Never stable</a><a href="/private/">Private</a><a href="/random/">Random</a><a href="/drifting/">Drifting</a><a href="/loc-en/">Locale EN</a><a href="/loc-th/">Locale TH</a>',
           clientRouter,
+        ),
+      );
+      return;
+    }
+    if (pathname === "/private/") {
+      const authorized = (request.headers.cookie ?? "").includes("routeplay-session=");
+      if (!authorized) {
+        response.statusCode = 403;
+        response.end(
+          shell(
+            "Sign in",
+            "/private/",
+            '<h1>Sign in</h1><p>This synthetic route requires a session cookie.</p><a href="/">Home</a>',
+          ),
+        );
+        return;
+      }
+      response.end(
+        shell(
+          "Private",
+          "/private/",
+          '<h1>Private</h1><p>This authenticated route renders identical content on every surface.</p><a href="/">Home</a>',
+        ),
+      );
+      return;
+    }
+    if (pathname === "/random/") {
+      const token = Math.random().toString(36).slice(2, 8);
+      response.end(
+        shell(
+          `Random ${token}`,
+          "/random/",
+          `<h1>Random ${token}</h1><p>This route deliberately renders token ${token} on every request.</p><a href="/">Home</a>`,
+        ),
+      );
+      return;
+    }
+    if (pathname === "/drifting/") {
+      driftingHits += 1;
+      // Two requests per capture (direct load and the click), so the first two runs agree.
+      const version = driftingHits <= 4 ? "Version one" : "Version two";
+      response.end(
+        shell(
+          version,
+          "/drifting/",
+          `<h1>${version}</h1><p>${version} of this route is stable inside one run and changes afterwards.</p><a href="/">Home</a>`,
+        ),
+      );
+      return;
+    }
+    if (pathname === "/loc-en/") {
+      response.end(
+        shell(
+          "Home EN",
+          "/loc-en/",
+          '<h1>Home EN</h1><p>English locale page advertising both alternates.</p><a href="/">Home</a>',
+          "",
+          '<link rel="alternate" hreflang="en" href="/loc-en/"><link rel="alternate" hreflang="th" href="/loc-th/">',
+          "en",
+        ),
+      );
+      return;
+    }
+    if (pathname === "/loc-th") {
+      response.statusCode = 308;
+      response.setHeader("location", "/loc-th/");
+      response.end();
+      return;
+    }
+    if (pathname === "/loc-th/") {
+      response.end(
+        shell(
+          "Home TH",
+          "/loc-th/",
+          '<h1>Home TH</h1><p>Thai locale page that forgets the return alternate.</p><a href="/">Home</a>',
+          "",
+          '<link rel="alternate" hreflang="th" href="/loc-th/">',
+          "th",
         ),
       );
       return;
@@ -206,6 +292,21 @@ export async function startFixtureServer(): Promise<{
           "Reflect",
           "/reflect/",
           `<h1>Reflect</h1><p data-reflected="${reflected}">Credential reflection fixture: ${reflected}</p><a href="/">Home</a>`,
+        ),
+      );
+      return;
+    }
+    if (pathname === "/reflect-state/") {
+      const cookie = (request.headers.cookie ?? "none")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;");
+      response.end(
+        shell(
+          "State reflection",
+          "/reflect-state/",
+          `<h1>State reflection</h1><p>${cookie}</p><div id="state"></div><a href="/reflect-state/">Self</a>`,
+          `<script>const token = JSON.parse(localStorage.getItem('session') || '{}').token || ''; document.querySelector('#state').textContent = token; console.error('Reflected token: ' + token);</script>`,
         ),
       );
       return;

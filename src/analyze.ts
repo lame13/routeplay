@@ -1,9 +1,12 @@
+import { baselineEntryFor } from "./baseline.js";
 import { textSimilarity } from "./similarity.js";
 import type {
+  BaselineFile,
   Capture,
   CompareSettings,
   Comparison,
   Finding,
+  HreflangEntry,
   NavigationMode,
   Phase,
   RuntimeEvent,
@@ -33,9 +36,63 @@ function sampleDifference(
   };
 }
 
+interface FieldRules {
+  url: string;
+  title: string;
+  description: string;
+  canonical: string;
+  robots: string;
+  h1: string;
+  main: string;
+  links: string;
+  jsonLd: string;
+  lang: string;
+  hreflangs: string;
+}
+
+const surfaceNames: Record<Phase, string> = {
+  server: "server HTML",
+  cold: "the cold load",
+  transition: "in-app navigation",
+};
+
+const parityComparisonLabels: Record<"server-cold" | "cold-transition", string> = {
+  "server-cold": "server and cold",
+  "cold-transition": "cold and transition",
+};
+
+const parityRules: FieldRules = {
+  url: "RP101",
+  title: "RP102",
+  description: "RP103",
+  canonical: "RP104",
+  robots: "RP105",
+  h1: "RP106",
+  main: "RP107",
+  links: "RP108",
+  jsonLd: "RP110",
+  lang: "RP501",
+  hreflangs: "RP502",
+};
+
+const baselineRules: FieldRules = {
+  url: "RP401",
+  title: "RP402",
+  description: "RP403",
+  canonical: "RP404",
+  robots: "RP405",
+  h1: "RP406",
+  main: "RP407",
+  links: "RP408",
+  jsonLd: "RP409",
+  lang: "RP410",
+  hreflangs: "RP411",
+};
+
 function compareField(
   findings: Finding[],
   comparison: Comparison,
+  phrase: string,
   ruleId: string,
   label: string,
   expected: unknown,
@@ -47,63 +104,54 @@ function compareField(
     ruleId,
     severity,
     comparison,
-    message: `${label} differs between ${comparison.replace("-", " and ")}.`,
+    message: `${label} differs between ${phrase}.`,
     expected,
     actual,
   });
 }
 
-function compareSnapshots(
+function hreflangKeys(entries: HreflangEntry[]): string[] {
+  return entries.map((entry) => `${entry.hreflang} ${entry.href}`);
+}
+
+function compareSemanticFields(
   findings: Finding[],
   comparison: Comparison,
+  phrase: string,
+  rules: FieldRules,
+  severity: Finding["severity"],
   expected: SemanticSnapshot,
   actual: SemanticSnapshot,
   settings: CompareSettings,
+  options: { includeUrl?: boolean } = {},
 ): void {
-  const severity = comparison === "cold-transition" ? "error" : "warning";
-  compareField(findings, comparison, "RP102", "Title", expected.titles, actual.titles, severity);
-  compareField(
-    findings,
-    comparison,
-    "RP103",
-    "Meta description",
-    expected.descriptions,
-    actual.descriptions,
-    severity,
-  );
-  compareField(
-    findings,
-    comparison,
-    "RP104",
-    "Canonical URL",
-    expected.canonicals,
-    actual.canonicals,
-    severity,
-  );
-  compareField(
-    findings,
-    comparison,
-    "RP105",
-    "Robots directives",
-    expected.robots,
-    actual.robots,
-    severity,
-  );
-  compareField(findings, comparison, "RP106", "H1", expected.h1, actual.h1, severity);
-  compareField(
-    findings,
-    comparison,
-    "RP110",
-    "JSON-LD blocks",
-    expected.jsonLdFingerprints,
-    actual.jsonLdFingerprints,
-    severity,
-  );
+  const compare = (ruleId: string, label: string, left: unknown, right: unknown): void =>
+    compareField(findings, comparison, phrase, ruleId, label, left, right, severity);
+
+  if (options.includeUrl) compare(rules.url, "Final route URL", expected.url, actual.url);
+  compare(rules.title, "Title", expected.titles, actual.titles);
+  compare(rules.description, "Meta description", expected.descriptions, actual.descriptions);
+  compare(rules.canonical, "Canonical URL", expected.canonicals, actual.canonicals);
+  compare(rules.robots, "Robots directives", expected.robots, actual.robots);
+  compare(rules.h1, "H1", expected.h1, actual.h1);
+  compare(rules.lang, "Document language", expected.lang, actual.lang);
+  compare(rules.jsonLd, "JSON-LD blocks", expected.jsonLdFingerprints, actual.jsonLdFingerprints);
+
+  if (stable(hreflangKeys(expected.hreflangs)) !== stable(hreflangKeys(actual.hreflangs))) {
+    findings.push({
+      ruleId: rules.hreflangs,
+      severity,
+      comparison,
+      message: `Hreflang alternates differ between ${phrase}.`,
+      actual: sampleDifference(hreflangKeys(expected.hreflangs), hreflangKeys(actual.hreflangs)),
+      hint: "Every surface of a localized route should advertise the same alternates.",
+    });
+  }
 
   const similarity = textSimilarity(expected.main.text, actual.main.text);
   if (similarity < settings.minTextSimilarity) {
     findings.push({
-      ruleId: "RP107",
+      ruleId: rules.main,
       severity,
       comparison,
       message: `Main-content similarity is ${similarity.toFixed(3)}, below ${settings.minTextSimilarity.toFixed(3)}.`,
@@ -115,7 +163,7 @@ function compareSnapshots(
 
   if (settings.compareLinks && stable(expected.links) !== stable(actual.links)) {
     findings.push({
-      ruleId: "RP108",
+      ruleId: rules.links,
       severity,
       comparison,
       message: "Crawlable internal-link targets differ.",
@@ -125,11 +173,127 @@ function compareSnapshots(
   }
 }
 
-const surfaceNames: Record<Phase, string> = {
-  server: "server HTML",
-  cold: "the cold load",
-  transition: "in-app navigation",
-};
+function compareSnapshots(
+  findings: Finding[],
+  comparison: "server-cold" | "cold-transition",
+  expected: SemanticSnapshot,
+  actual: SemanticSnapshot,
+  settings: CompareSettings,
+): void {
+  compareSemanticFields(
+    findings,
+    comparison,
+    parityComparisonLabels[comparison],
+    parityRules,
+    comparison === "cold-transition" ? "error" : "warning",
+    expected,
+    actual,
+    settings,
+  );
+}
+
+function baselineComparison(phase: Phase): Comparison {
+  return `baseline-${phase}` as Comparison;
+}
+
+/**
+ * Compares a fresh capture against a recorded baseline. Every phase is checked, because a baseline
+ * is the only way to notice that all three surfaces agree on newly wrong content.
+ */
+export function baselineFindings(
+  spec: TransitionSpec,
+  specHash: string,
+  baseline: BaselineFile | undefined,
+  captures: { server: Capture; cold: Capture; transition: Capture },
+  settings: CompareSettings,
+): Finding[] {
+  if (!baseline) return [];
+  const entry = baselineEntryFor(baseline, spec);
+  if (!entry) {
+    return [
+      {
+        ruleId: "RP400",
+        severity: "warning",
+        message: "No recorded baseline entry covers this transition.",
+        hint: 'Run "npx routeplay snapshot" to record the current behavior as the expected one.',
+      },
+    ];
+  }
+  if (entry.specHash !== specHash) {
+    return [
+      {
+        ruleId: "RP400",
+        severity: "warning",
+        message: "The recorded baseline was captured with different transition settings.",
+        expected: entry.specHash,
+        actual: specHash,
+        hint: "Re-record with --update-baseline once the new settings are correct.",
+      },
+    ];
+  }
+
+  const findings: Finding[] = [];
+  const pairs: Array<[Phase, SemanticSnapshot]> = [
+    ["server", captures.server.semantic],
+    ["cold", captures.cold.semantic],
+    ["transition", captures.transition.semantic],
+  ];
+  for (const [phase, snapshot] of pairs) {
+    compareSemanticFields(
+      findings,
+      baselineComparison(phase),
+      `the recorded baseline and ${surfaceNames[phase]}`,
+      baselineRules,
+      "error",
+      entry.phases[phase],
+      snapshot,
+      settings,
+      { includeUrl: true },
+    );
+  }
+  return findings;
+}
+
+function canonicalUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    url.hash = "";
+    return url.href;
+  } catch {
+    return value;
+  }
+}
+
+/**
+ * Cross-route hreflang reciprocity, limited to destinations this config covers. A single-transition
+ * config therefore never reports anything.
+ */
+export function hreflangReciprocityFindings(
+  routes: Array<{ to: string; hreflangs: HreflangEntry[] }>,
+): Finding[][] {
+  const declared = new Map<string, HreflangEntry[]>();
+  for (const route of routes) declared.set(canonicalUrl(route.to), route.hreflangs);
+  return routes.map((route) => {
+    const self = canonicalUrl(route.to);
+    const findings: Finding[] = [];
+    for (const entry of route.hreflangs) {
+      const target = canonicalUrl(entry.href);
+      if (target === self) continue;
+      const other = declared.get(target);
+      if (!other) continue;
+      if (other.some((candidate) => canonicalUrl(candidate.href) === self)) continue;
+      findings.push({
+        ruleId: "RP503",
+        severity: "warning",
+        message: `Hreflang "${entry.hreflang}" points to ${target}, which declares no alternate back to ${self}.`,
+        expected: { hreflang: entry.hreflang, href: target },
+        actual: { declaredBy: other.map((candidate) => candidate.hreflang) },
+        hint: "Reciprocal hreflang links keep locale clusters crawlable.",
+      });
+    }
+    return findings;
+  });
+}
 
 function humanList(values: string[]): string {
   if (values.length === 1) return values[0] ?? "";
@@ -249,6 +413,13 @@ function routeContractFindings(
   if (contract.h1 !== undefined) {
     add(exactContractFinding("RP304", "H1 content", contract.h1, surfaces, (value) => value.h1));
   }
+  if (contract.lang !== undefined) {
+    add(
+      exactContractFinding("RP309", "Document language", [contract.lang], surfaces, (value) => [
+        value.lang,
+      ]),
+    );
+  }
   if (contract.robots !== undefined) {
     const agents = Object.keys(contract.robots);
     add(
@@ -350,6 +521,7 @@ export function analyzeCaptures(
   compareField(
     findings,
     "server-cold",
+    parityComparisonLabels["server-cold"],
     "RP101",
     "Direct response URL",
     withoutHash(spec.expectedFinalUrl),
@@ -359,6 +531,7 @@ export function analyzeCaptures(
   compareField(
     findings,
     "server-cold",
+    parityComparisonLabels["server-cold"],
     "RP101",
     "Cold browser URL",
     spec.expectedFinalUrl,
@@ -428,6 +601,7 @@ export function analyzeCaptures(
   compareField(
     findings,
     "cold-transition",
+    parityComparisonLabels["cold-transition"],
     "RP101",
     "Final URL",
     cold.semantic.url,

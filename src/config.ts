@@ -2,9 +2,14 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { normalizeText } from "./similarity.js";
-import type { CheckOptions, RouteExpectations, RoutePlayConfig } from "./types.js";
+import type { CheckOptions, IgnoreRule, RouteExpectations, RoutePlayConfig } from "./types.js";
 
 const expectedText = z.string().trim().min(1);
+
+function isIsoDate(value: string): boolean {
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
 
 const routeExpectationsSchema = z
   .object({
@@ -12,6 +17,7 @@ const routeExpectationsSchema = z
     description: expectedText.optional(),
     canonical: expectedText.optional(),
     h1: z.array(expectedText).min(1).optional(),
+    lang: expectedText.optional(),
     robots: z
       .record(expectedText, z.array(expectedText).min(1))
       .refine((value) => Object.keys(value).length > 0, {
@@ -40,12 +46,54 @@ const transitionSchema = z
     expectedStatus: z.number().int().min(100).max(599).default(200),
     requireClientNavigation: z.boolean().default(false),
     expect: routeExpectationsSchema.optional(),
+    paths: z.array(z.string().trim().min(1)).default([]),
   })
   .strict();
 
 const httpUrl = z.url().refine((value) => /^https?:\/\//i.test(value), {
   message: "Only HTTP(S) URLs are supported.",
 });
+
+const cookieSchema = z
+  .object({
+    name: z.string().trim().min(1),
+    value: z.string(),
+    url: httpUrl.optional(),
+    domain: z.string().trim().min(1).optional(),
+    path: z.string().trim().min(1).optional(),
+    httpOnly: z.boolean().optional(),
+    secure: z.boolean().optional(),
+    sameSite: z.enum(["Strict", "Lax", "None"]).optional(),
+    expires: z.number().optional(),
+  })
+  .strict()
+  .refine(
+    (cookie) =>
+      cookie.url === undefined || (cookie.domain === undefined && cookie.path === undefined),
+    {
+      message: "Use either url or domain/path for a cookie, not both.",
+    },
+  )
+  .refine((cookie) => cookie.path === undefined || cookie.path.startsWith("/"), {
+    message: "Cookie paths must start with /.",
+  });
+
+const ignoreRuleSchema = z
+  .object({
+    ruleId: z
+      .string()
+      .trim()
+      .regex(/^(?:RP\d{3}|\*)$/i, "Use a rule ID like RP108, or * for every rule."),
+    reason: z.string().trim().min(1),
+    transition: z.string().trim().min(1).optional(),
+    until: z
+      .string()
+      .trim()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "Use an ISO date like 2026-12-01.")
+      .refine(isIsoDate, { message: "Use a real calendar date like 2026-12-01." })
+      .optional(),
+  })
+  .strict();
 
 const configSchema = z
   .object({
@@ -59,6 +107,8 @@ const configSchema = z
         locale: z.string().min(2).default("en-US"),
         timezoneId: z.string().min(1).default("UTC"),
         userAgent: z.string().min(1).optional(),
+        storageState: z.string().trim().min(1).optional(),
+        cookies: z.array(cookieSchema).default([]),
         viewport: z
           .object({
             width: z.number().int().min(320).max(7680).default(1440),
@@ -73,6 +123,7 @@ const configSchema = z
         settleMs: 500,
         locale: "en-US",
         timezoneId: "UTC",
+        cookies: [],
         viewport: { width: 1440, height: 900 },
       }),
     compare: z
@@ -87,6 +138,8 @@ const configSchema = z
     failOn: z.enum(["error", "warning", "never"]).default("error"),
     concurrency: z.number().int().min(1).max(8).default(1),
     retries: z.number().int().min(0).max(3).default(0),
+    repeat: z.number().int().min(1).max(5).default(1),
+    ignore: z.array(ignoreRuleSchema).default([]),
     artifacts: z.string().trim().min(1).optional(),
   })
   .strict();
@@ -164,6 +217,7 @@ function normalizeExpectations(value: RouteExpectations, baseUrl: string): Route
     ...(value.description === undefined ? {} : { description: normalizeText(value.description) }),
     ...(value.canonical === undefined ? {} : { canonical: normalizeUrl(baseUrl, value.canonical) }),
     ...(value.h1 === undefined ? {} : { h1: value.h1.map((heading) => normalizeText(heading)) }),
+    ...(value.lang === undefined ? {} : { lang: normalizeText(value.lang).toLocaleLowerCase() }),
     ...(value.robots === undefined ? {} : { robots: normalizeRobots(value.robots) }),
     ...(value.jsonLdTypesInclude === undefined
       ? {}
@@ -185,6 +239,13 @@ function normalizeExpectations(value: RouteExpectations, baseUrl: string): Route
           ),
         }),
   };
+}
+
+function normalizeIgnoreRules(rules: IgnoreRule[]): IgnoreRule[] {
+  return rules.map((rule) => ({
+    ...rule,
+    ruleId: rule.ruleId === "*" ? "*" : rule.ruleId.toUpperCase(),
+  }));
 }
 
 export async function loadConfig(options: CheckOptions): Promise<RoutePlayConfig> {
@@ -231,10 +292,19 @@ export async function loadConfig(options: CheckOptions): Promise<RoutePlayConfig
       interpolateEnvironment(value, key),
     ]),
   );
+  // Cookie values are credentials, so they support the same environment indirection as headers.
+  const cookies = parsed.data.browser.cookies.map((cookie) => ({
+    ...cookie,
+    value: interpolateEnvironment(cookie.value, `cookie ${cookie.name}`),
+  }));
+  const storageStateOverride = options.storageState?.trim();
+  if (storageStateOverride === "") throw new Error("Storage state path must not be empty.");
+  const storageState = storageStateOverride ?? parsed.data.browser.storageState;
   const baseUrl = new URL(options.baseUrl ?? parsed.data.baseUrl).href;
   const concurrency =
     integerOverride(options.concurrency, 1, 8, "Concurrency") ?? parsed.data.concurrency;
   const retries = integerOverride(options.retries, 0, 3, "Retries") ?? parsed.data.retries;
+  const repeat = integerOverride(options.repeat, 1, 5, "Repeat") ?? parsed.data.repeat;
   const artifacts = options.artifacts?.trim() ?? parsed.data.artifacts;
   if (artifacts === "") throw new Error("Artifacts directory must not be empty.");
   const transitions = parsed.data.transitions.map((transition, index) => ({
@@ -245,6 +315,7 @@ export async function loadConfig(options: CheckOptions): Promise<RoutePlayConfig
     expectedFinalUrl: normalizeUrl(baseUrl, transition.expectedFinalUrl ?? transition.to),
     ...(transition.expect ? { expect: normalizeExpectations(transition.expect, baseUrl) } : {}),
   }));
+  const ignore = normalizeIgnoreRules(parsed.data.ignore);
 
   const baseOrigin = new URL(baseUrl).origin;
   for (const transition of transitions) {
@@ -271,14 +342,33 @@ export async function loadConfig(options: CheckOptions): Promise<RoutePlayConfig
     }
   }
 
+  const transitionNames = new Set(transitions.map((transition) => transition.name));
+  if (transitionNames.size !== transitions.length) {
+    throw new Error("Transition names must be unique for baselines and suppressions.");
+  }
+  for (const [index, rule] of ignore.entries()) {
+    if (rule.transition !== undefined && !transitionNames.has(rule.transition)) {
+      throw new Error(
+        `ignore[${index}].transition "${rule.transition}" does not match any configured transition.`,
+      );
+    }
+  }
+
   return {
     ...parsed.data,
     baseUrl,
     transitions,
     headers,
+    browser: {
+      ...parsed.data.browser,
+      ...(storageState === undefined ? {} : { storageState }),
+      cookies,
+    },
     failOn: options.failOn ?? parsed.data.failOn,
     concurrency,
     retries,
+    repeat,
+    ignore,
     ...(artifacts === undefined ? {} : { artifacts }),
   };
 }

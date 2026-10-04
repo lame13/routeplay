@@ -17,6 +17,7 @@ Use Node.js 22 or 24. Add focused unit coverage for extractors/rules and a synth
 - Keep rule IDs stable; add new IDs instead of reusing old semantics.
 - Treat external input as untrusted and validate it at the boundary.
 - Never log request-header values, cookies, or storage state.
+- Keep recorded baselines redacted like reports: no header, cookie, or storage-state values in committed evidence.
 - Avoid full DOM comparisons and `networkidle`.
 - Do not force-click, submit forms, or invoke application routers.
 - Run `npm run check` and `npm pack --dry-run` before opening a PR.

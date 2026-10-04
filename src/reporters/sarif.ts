@@ -1,3 +1,4 @@
+import { activeFindings } from "../policy.js";
 import type { Finding, RoutePlayReport } from "../types.js";
 
 const descriptions: Record<string, string> = {
@@ -5,6 +6,7 @@ const descriptions: Record<string, string> = {
   RP002: "A safe, crawlable anchor for the configured transition was unavailable.",
   RP003: "Clicking the configured anchor did not reach the expected route.",
   RP004: "Observed navigation mode differs from the configured requirement.",
+  RP006: "A suppression has expired and no longer hides its finding.",
   RP101: "Final route URL differs between cold and in-app navigation.",
   RP102: "Document title differs between route surfaces.",
   RP103: "Meta description differs between route surfaces.",
@@ -31,6 +33,24 @@ const descriptions: Record<string, string> = {
   RP306: "A required JSON-LD type is missing.",
   RP307: "Required text is missing from the route's main content.",
   RP308: "A required crawlable internal link is missing.",
+  RP309: "Document language does not match the configured route contract.",
+  RP400: "A baseline entry is missing or was recorded with different transition settings.",
+  RP401: "The final route URL differs from the recorded baseline.",
+  RP402: "The document title differs from the recorded baseline.",
+  RP403: "The meta description differs from the recorded baseline.",
+  RP404: "The canonical URL differs from the recorded baseline.",
+  RP405: "Robots directives differ from the recorded baseline.",
+  RP406: "H1 content differs from the recorded baseline.",
+  RP407: "Main content differs from the recorded baseline.",
+  RP408: "Crawlable internal links differ from the recorded baseline.",
+  RP409: "JSON-LD blocks differ from the recorded baseline.",
+  RP410: "Document language differs from the recorded baseline.",
+  RP411: "Hreflang alternates differ from the recorded baseline.",
+  RP501: "Document language differs between route surfaces.",
+  RP502: "Hreflang alternates differ between route surfaces.",
+  RP503: "A configured hreflang alternate is not reciprocal.",
+  RP601: "A field changed between repeated captures of the same route surface.",
+  RP602: "A repeated capture did not complete.",
 };
 
 function resultFor(finding: Finding, uri: string): object {
@@ -53,7 +73,7 @@ export function sarifReport(report: RoutePlayReport): string {
   const ids = [
     ...new Set(
       report.results.flatMap((result) =>
-        result.findings
+        activeFindings(result.findings)
           .filter((finding) => finding.severity !== "info")
           .map((finding) => finding.ruleId),
       ),
@@ -68,15 +88,20 @@ export function sarifReport(report: RoutePlayReport): string {
           driver: {
             name: "RoutePlay",
             version: report.tool.version,
-            informationUri: "https://github.com/lame13/routeplay",
+            informationUri: "https://nikocodes.com/software/routeplay/",
             rules: ids.map((id) => ({
               id,
               shortDescription: { text: descriptions[id] ?? "RoutePlay finding" },
             })),
           },
         },
+        properties: {
+          run: report.run,
+          ...(report.scope ? { scope: report.scope } : {}),
+          summary: report.summary,
+        },
         results: report.results.flatMap((result) =>
-          result.findings
+          activeFindings(result.findings)
             .filter((finding) => finding.severity !== "info")
             .map((finding) => resultFor(finding, result.to)),
         ),

@@ -1,4 +1,5 @@
-import type { RoutePlayReport } from "./types.js";
+import { storageStateSecrets } from "./auth.js";
+import type { RoutePlayConfig, RoutePlayReport } from "./types.js";
 
 export function secretValues(headerValues: string[]): string[] {
   return [
@@ -34,4 +35,13 @@ export function redactUnknown(value: unknown, secrets: string[]): unknown {
 
 export function redactSecrets(report: RoutePlayReport, headerValues: string[]): RoutePlayReport {
   return redactUnknown(report, secretValues(headerValues)) as RoutePlayReport;
+}
+
+/** Every configured credential, including values reflected from storage state. */
+export function configSecretValues(config: RoutePlayConfig): string[] {
+  return secretValues([
+    ...Object.values(config.headers),
+    ...config.browser.cookies.map((cookie) => cookie.value),
+    ...storageStateSecrets(config.storageStateData),
+  ]);
 }

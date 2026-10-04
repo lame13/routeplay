@@ -7,7 +7,7 @@ COPY biome.json tsconfig.json tsup.config.ts vitest.config.ts ./
 COPY src ./src
 RUN npm run build
 
-FROM mcr.microsoft.com/playwright:v1.62.1-noble AS runner
+FROM mcr.microsoft.com/playwright:v1.63.0-noble AS runner
 
 WORKDIR /app
 COPY package.json package-lock.json ./

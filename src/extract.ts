@@ -1,6 +1,6 @@
 import { type CheerioAPI, load } from "cheerio";
 import { hashText, normalizeText } from "./similarity.js";
-import type { SemanticSnapshot } from "./types.js";
+import type { HreflangEntry, SemanticSnapshot } from "./types.js";
 
 export interface ExtractOptions {
   mainSelector?: string | undefined;
@@ -41,6 +41,36 @@ function resolveUrls(values: string[], baseUrl: string, deduplicate = true): str
   }
   const sorted = resolved.filter(Boolean).sort((left, right) => left.localeCompare(right));
   return deduplicate ? [...new Set(sorted)] : sorted;
+}
+
+/**
+ * Alternate-language declarations are compared across surfaces, so entries are resolved and
+ * sorted rather than left in author order.
+ */
+function extractHreflangs($: CheerioAPI, resolutionBase: string): HreflangEntry[] {
+  const entries = new Map<string, HreflangEntry>();
+  $('link[rel~="alternate" i][hreflang]').each((_index, element) => {
+    const hreflang = normalizeText($(element).attr("hreflang") ?? "").toLocaleLowerCase();
+    const rawHref = ($(element).attr("href") ?? "").trim();
+    if (!hreflang || !rawHref) return;
+    let href: string;
+    try {
+      const url = new URL(rawHref, resolutionBase);
+      if (!/^https?:$/.test(url.protocol)) return;
+      href = url.href;
+    } catch {
+      return;
+    }
+    entries.set(`${hreflang}\u0000${href}`, { hreflang, href });
+  });
+  return [...entries.values()].sort(
+    (left, right) =>
+      left.hreflang.localeCompare(right.hreflang) || left.href.localeCompare(right.href),
+  );
+}
+
+function extractLang($: CheerioAPI): string {
+  return normalizeText($("html").first().attr("lang") ?? "").toLocaleLowerCase();
 }
 
 function stableJson(value: unknown): string {
@@ -137,6 +167,8 @@ export function extractSemantics(
 
   return {
     url: documentUrl,
+    lang: extractLang($),
+    hreflangs: extractHreflangs($, resolutionBase),
     titles: textValues($, "title"),
     descriptions: textValues($, 'meta[name="description" i][content]', "content"),
     canonicals: resolveUrls(

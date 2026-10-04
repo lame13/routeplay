@@ -1,8 +1,9 @@
 import pc from "picocolors";
-import { severityFails } from "../policy.js";
+import { failsPolicy } from "../policy.js";
 import type { Finding, RoutePlayReport } from "../types.js";
 
 function mark(finding: Finding): string {
+  if (finding.suppressed === true) return pc.dim("SKIP ");
   if (finding.severity === "error") return pc.red("ERROR");
   if (finding.severity === "warning") return pc.yellow("WARN ");
   return pc.cyan("INFO ");
@@ -19,17 +20,29 @@ export function terminalReport(report: RoutePlayReport): string {
   lines.push(
     `${report.summary.transitions} transition(s) · ${(report.durationMs / 1000).toFixed(1)}s`,
   );
+  if (report.scope) {
+    lines.push(
+      pc.dim(
+        `Scoped to changed files since ${report.scope.diffBase}: ${report.scope.changedFiles.length} changed file(s), ${report.scope.skipped} transition(s) skipped`,
+      ),
+    );
+  }
+  if (report.run.repeat > 1) {
+    lines.push(pc.dim(`${report.run.repeat} captures per transition (repeat detection)`));
+  }
   lines.push("");
   for (const result of report.results) {
-    const failed =
-      !result.complete ||
-      result.findings.some((finding) => severityFails(finding.severity, report.policy.failOn));
+    const failed = !result.complete || failsPolicy(result.findings, report.policy.failOn);
     lines.push(`${failed ? pc.red("✗") : pc.green("✓")} ${pc.bold(result.name)}`);
     const attempts = result.attempts > 1 ? ` · ${result.attempts} attempts` : "";
     lines.push(`  ${result.from} → ${result.to} · ${result.navigation.mode}${attempts}`);
     for (const finding of result.findings) {
       if (finding.severity === "info" && finding.ruleId === "RP004") continue;
-      lines.push(`  ${mark(finding)} ${finding.ruleId} ${finding.message}`);
+      const reason =
+        finding.suppressed === true && finding.suppressedReason
+          ? pc.dim(` (suppressed: ${finding.suppressedReason})`)
+          : "";
+      lines.push(`  ${mark(finding)} ${finding.ruleId} ${finding.message}${reason}`);
       if (finding.expected !== undefined)
         lines.push(`        expected: ${value(finding.expected)}`);
       if (finding.actual !== undefined) lines.push(`        actual:   ${value(finding.actual)}`);
@@ -40,7 +53,9 @@ export function terminalReport(report: RoutePlayReport): string {
     }
     lines.push("");
   }
-  const summary = `${report.summary.passed} passed · ${report.summary.failed} failed · ${report.summary.incomplete} incomplete · ${report.summary.errors} errors · ${report.summary.warnings} warnings`;
+  const suppressed =
+    report.summary.suppressed > 0 ? ` · ${report.summary.suppressed} suppressed` : "";
+  const summary = `${report.summary.passed} passed · ${report.summary.failed} failed · ${report.summary.incomplete} incomplete · ${report.summary.errors} errors · ${report.summary.warnings} warnings${suppressed}`;
   lines.push(report.passed ? pc.green(pc.bold(summary)) : pc.red(pc.bold(summary)));
   return lines.join("\n");
 }

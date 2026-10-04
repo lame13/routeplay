@@ -26,6 +26,11 @@
           "readySelector": { "type": "string", "minLength": 1 },
           "expectedStatus": { "type": "integer", "minimum": 100, "maximum": 599, "default": 200 },
           "requireClientNavigation": { "type": "boolean", "default": false },
+          "paths": {
+            "type": "array",
+            "description": "Source globs that make this transition relevant to --only-changed. An empty list always runs.",
+            "items": { "type": "string", "minLength": 1 }
+          },
           "expect": {
             "type": "object",
             "description": "Semantic values that must hold in server HTML, a cold load, and in-app navigation.",
@@ -40,6 +45,7 @@
                 "minItems": 1,
                 "items": { "type": "string", "minLength": 1 }
               },
+              "lang": { "type": "string", "minLength": 1 },
               "robots": {
                 "type": "object",
                 "minProperties": 1,
@@ -79,6 +85,35 @@
         "locale": { "type": "string", "default": "en-US" },
         "timezoneId": { "type": "string", "default": "UTC" },
         "userAgent": { "type": "string", "minLength": 1 },
+        "storageState": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Playwright storage state file reused for authenticated routes. Resolved from the working directory."
+        },
+        "cookies": {
+          "type": "array",
+          "description": "Cookies seeded into every capture context. Values may use ${ENV_VAR} placeholders and are redacted from reports.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "value"],
+            "allOf": [
+              { "not": { "required": ["url", "domain"] } },
+              { "not": { "required": ["url", "path"] } }
+            ],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "value": { "type": "string" },
+              "url": { "type": "string", "format": "uri", "pattern": "^https?://" },
+              "domain": { "type": "string", "minLength": 1 },
+              "path": { "type": "string", "minLength": 1, "pattern": "^/" },
+              "httpOnly": { "type": "boolean" },
+              "secure": { "type": "boolean" },
+              "sameSite": { "enum": ["Strict", "Lax", "None"] },
+              "expires": { "type": "number" }
+            }
+          }
+        },
         "viewport": {
           "type": "object",
           "additionalProperties": false,
@@ -123,6 +158,28 @@
       "maximum": 3,
       "default": 0,
       "description": "Extra attempts for a transition that is incomplete or still violates the configured policy."
+    },
+    "repeat": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 5,
+      "default": 1,
+      "description": "Captures per transition. Values above 1 report fields that change between identical captures."
+    },
+    "ignore": {
+      "type": "array",
+      "description": "Findings accepted for now. Evidence stays in the report, and an expired suppression reports itself.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ruleId", "reason"],
+        "properties": {
+          "ruleId": { "type": "string", "pattern": "^(?:RP[0-9]{3}|\\*)$" },
+          "reason": { "type": "string", "minLength": 1 },
+          "transition": { "type": "string", "minLength": 1 },
+          "until": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }
+        }
+      }
     },
     "artifacts": {
       "type": "string",

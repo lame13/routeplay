@@ -1,13 +1,26 @@
+import type { StorageState } from "./auth.js";
+
 export type Severity = "error" | "warning" | "info";
 export type Phase = "server" | "cold" | "transition";
-export type Comparison = "server-cold" | "cold-transition";
+export type Comparison =
+  | "server-cold"
+  | "cold-transition"
+  | "baseline-server"
+  | "baseline-cold"
+  | "baseline-transition";
 export type NavigationMode = "client" | "document" | "unknown";
+
+export interface HreflangEntry {
+  hreflang: string;
+  href: string;
+}
 
 export interface RouteExpectations {
   title?: string | undefined;
   description?: string | undefined;
   canonical?: string | undefined;
   h1?: string[] | undefined;
+  lang?: string | undefined;
   robots?: Record<string, string[]> | undefined;
   jsonLdTypesInclude?: string[] | undefined;
   mainTextIncludes?: string[] | undefined;
@@ -19,6 +32,7 @@ export interface TransitionSpec {
   from: string;
   to: string;
   expectedFinalUrl: string;
+  paths: string[];
   selector?: string | undefined;
   mainSelector?: string | undefined;
   ignoreSelectors: string[];
@@ -28,12 +42,26 @@ export interface TransitionSpec {
   expect?: RouteExpectations | undefined;
 }
 
+export interface CookieSeed {
+  name: string;
+  value: string;
+  url?: string | undefined;
+  domain?: string | undefined;
+  path?: string | undefined;
+  httpOnly?: boolean | undefined;
+  secure?: boolean | undefined;
+  sameSite?: "Strict" | "Lax" | "None" | undefined;
+  expires?: number | undefined;
+}
+
 export interface BrowserSettings {
   timeoutMs: number;
   settleMs: number;
   locale: string;
   timezoneId: string;
   userAgent?: string | undefined;
+  storageState?: string | undefined;
+  cookies: CookieSeed[];
   viewport: { width: number; height: number };
 }
 
@@ -41,6 +69,26 @@ export interface CompareSettings {
   minTextSimilarity: number;
   minSourceTextLength: number;
   compareLinks: boolean;
+}
+
+export interface IgnoreRule {
+  ruleId: string;
+  reason: string;
+  transition?: string | undefined;
+  until?: string | undefined;
+}
+
+/** Transitions removed by `--only-changed` before the run started. */
+export interface SkippedTransition {
+  name: string;
+  to: string;
+}
+
+/** Recording of the `--only-changed` filter, set by the CLI after reading Git. */
+export interface RunScope {
+  diffBase: string;
+  changedFiles: string[];
+  skipped: SkippedTransition[];
 }
 
 export interface RoutePlayConfig {
@@ -52,11 +100,21 @@ export interface RoutePlayConfig {
   failOn: "error" | "warning" | "never";
   concurrency: number;
   retries: number;
+  repeat: number;
+  ignore: IgnoreRule[];
   artifacts?: string | undefined;
+  /** Runtime-only: set by the CLI when `--only-changed` filtered the transition list. */
+  scope?: RunScope | undefined;
+  /** Runtime-only: set by the CLI when a recorded baseline should be compared. */
+  baseline?: BaselineFile | undefined;
+  /** Runtime-only: storage state loaded once before capturing. */
+  storageStateData?: StorageState | undefined;
 }
 
 export interface SemanticSnapshot {
   url: string;
+  lang: string;
+  hreflangs: HreflangEntry[];
   titles: string[];
   descriptions: string[];
   canonicals: string[];
@@ -108,6 +166,8 @@ export interface Finding {
   expected?: unknown;
   actual?: unknown;
   hint?: string;
+  suppressed?: boolean;
+  suppressedReason?: string;
 }
 
 export interface TransitionResult {
@@ -141,6 +201,30 @@ export interface RunSummary {
   errors: number;
   warnings: number;
   info: number;
+  suppressed: number;
+}
+
+export interface BaselinePhaseSnapshots {
+  server: SemanticSnapshot;
+  cold: SemanticSnapshot;
+  transition: SemanticSnapshot;
+}
+
+export interface BaselineEntry {
+  name: string;
+  from: string;
+  to: string;
+  specHash: string;
+  recordedAt: string;
+  phases: BaselinePhaseSnapshots;
+}
+
+export interface BaselineFile {
+  schemaVersion: 1;
+  tool: { name: "routeplay"; version: string };
+  baseUrl: string;
+  recordedAt: string;
+  transitions: BaselineEntry[];
 }
 
 export interface RoutePlayReport {
@@ -157,7 +241,8 @@ export interface RoutePlayReport {
     viewport: { width: number; height: number };
   };
   policy: { failOn: RoutePlayConfig["failOn"] };
-  run: { concurrency: number; retries: number };
+  run: { concurrency: number; retries: number; repeat: number };
+  scope?: { diffBase: string; changedFiles: string[]; skipped: number } | undefined;
   results: TransitionResult[];
   summary: RunSummary;
   passed: boolean;
@@ -173,7 +258,13 @@ export interface CheckOptions {
   failOn?: RoutePlayConfig["failOn"];
   concurrency?: number;
   retries?: number;
+  repeat?: number;
   artifacts?: string;
+  storageState?: string;
+  baseline?: string;
+  updateBaseline?: string;
+  onlyChanged?: boolean;
+  diffBase?: string;
   format?: "terminal" | "json" | "html" | "sarif";
   output?: string;
 }

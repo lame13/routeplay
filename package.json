@@ -1,6 +1,6 @@
 {
   "name": "routeplay",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Regression-test SSR routes across server HTML, cold loads, and real client-side navigation.",
   "keywords": [
     "technical-seo",
@@ -14,7 +14,7 @@
     "regression-testing",
     "seo-tools"
   ],
-  "homepage": "https://nikom.work",
+  "homepage": "https://nikocodes.com/software/routeplay/",
   "bugs": {
     "url": "https://github.com/lame13/routeplay/issues"
   },
@@ -23,7 +23,7 @@
     "url": "git+https://github.com/lame13/routeplay.git"
   },
   "license": "MIT",
-  "author": "Niko M. <https://nikom.work>",
+  "author": "Niko M. <https://nikocodes.com>",
   "type": "module",
   "bin": {
     "routeplay": "dist/cli.js"
@@ -41,6 +41,7 @@
     "README.md",
     "CHANGELOG.md",
     "CONTRIBUTING.md",
+    "PUBLISHING.md",
     "SECURITY.md",
     "LICENSE"
   ],

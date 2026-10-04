@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { analyzeCaptures } from "../src/analyze.js";
+import { analyzeCaptures, baselineFindings, hreflangReciprocityFindings } from "../src/analyze.js";
 import { extractSemantics } from "../src/extract.js";
-import type { Capture, TransitionSpec } from "../src/types.js";
+import type { BaselineFile, Capture, TransitionSpec } from "../src/types.js";
 
 const spec: TransitionSpec = {
   name: "Test",
   from: "https://example.test/",
   to: "https://example.test/page/",
   expectedFinalUrl: "https://example.test/page/",
+  paths: [],
   ignoreSelectors: [],
   expectedStatus: 200,
   requireClientNavigation: true,
@@ -30,6 +31,43 @@ function capture(phase: Capture["phase"], html: string): Capture {
           },
         }
       : {}),
+  };
+}
+
+const settings = { minTextSimilarity: 0.98, minSourceTextLength: 10, compareLinks: true };
+
+function baselineFrom(
+  html: string,
+  specHash = "hash",
+  name = "Test",
+): { baseline: BaselineFile; captures: Record<"server" | "cold" | "transition", Capture> } {
+  const captures = {
+    server: capture("server", html),
+    cold: capture("cold", html),
+    transition: capture("transition", html),
+  };
+  return {
+    captures,
+    baseline: {
+      schemaVersion: 1,
+      tool: { name: "routeplay", version: "0.5.0" },
+      baseUrl: "https://example.test/",
+      recordedAt: "2026-10-04T00:00:00.000Z",
+      transitions: [
+        {
+          name,
+          from: spec.from,
+          to: spec.to,
+          specHash,
+          recordedAt: "2026-10-04T00:00:00.000Z",
+          phases: {
+            server: captures.server.semantic,
+            cold: captures.cold.semantic,
+            transition: captures.transition.semantic,
+          },
+        },
+      ],
+    },
   };
 }
 
@@ -194,5 +232,170 @@ describe("analyzeCaptures", () => {
         actual: ["Old page"],
       }),
     );
+  });
+
+  it("compares document language and hreflang alternates across surfaces", () => {
+    const server = capture(
+      "server",
+      '<html lang="en"><title>Page</title><link rel="alternate" hreflang="en" href="/page/"><main><h1>Page</h1><p>Complete useful route content for visitors.</p></main>',
+    );
+    const cold = capture(
+      "cold",
+      '<html lang="th"><title>Page</title><link rel="alternate" hreflang="th" href="/page/"><main><h1>Page</h1><p>Complete useful route content for visitors.</p></main>',
+    );
+    const transition = capture(
+      "transition",
+      '<html lang="en"><title>Page</title><link rel="alternate" hreflang="en" href="/page/"><main><h1>Page</h1><p>Complete useful route content for visitors.</p></main>',
+    );
+    const findings = analyzeCaptures(spec, server, cold, transition, "client", true, settings);
+
+    expect(findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ruleId: "RP501",
+          comparison: "server-cold",
+          severity: "warning",
+        }),
+        expect.objectContaining({
+          ruleId: "RP501",
+          comparison: "cold-transition",
+          severity: "error",
+        }),
+        expect.objectContaining({ ruleId: "RP502", comparison: "cold-transition" }),
+      ]),
+    );
+  });
+
+  it("enforces a contract document language", () => {
+    const html = '<html lang="en"><title>Page</title><main><h1>Page</h1></main>';
+    const findings = analyzeCaptures(
+      { ...spec, expect: { lang: "th" } },
+      capture("server", html),
+      capture("cold", html),
+      capture("transition", html),
+      "client",
+      true,
+      settings,
+    );
+
+    expect(findings).toContainEqual(
+      expect.objectContaining({
+        ruleId: "RP309",
+        expected: ["th"],
+        actual: {
+          server: ["en"],
+          cold: ["en"],
+          transition: ["en"],
+        },
+      }),
+    );
+  });
+});
+
+describe("baselineFindings", () => {
+  it("reports no drift when the run matches the recorded baseline", () => {
+    const html = "<title>Page</title><main><h1>Page</h1><p>Complete recorded content.</p></main>";
+    const { baseline, captures } = baselineFrom(html);
+    expect(baselineFindings(spec, "hash", baseline, captures, settings)).toEqual([]);
+  });
+
+  it("reports baseline drift per surface with its own rule family", () => {
+    const recorded =
+      "<title>Page</title><main><h1>Page</h1><p>Complete recorded content.</p></main>";
+    const drifted =
+      "<title>Renamed</title><main><h1>Page</h1><p>Complete recorded content.</p></main>";
+    const { baseline } = baselineFrom(recorded);
+    const captures = {
+      server: capture("server", recorded),
+      cold: capture("cold", recorded),
+      transition: capture("transition", drifted),
+    };
+
+    const findings = baselineFindings(spec, "hash", baseline, captures, settings);
+    expect(findings).toEqual([
+      expect.objectContaining({
+        ruleId: "RP402",
+        comparison: "baseline-transition",
+        severity: "error",
+        expected: ["Page"],
+        actual: ["Renamed"],
+      }),
+    ]);
+  });
+
+  it("flags missing and stale baseline entries instead of guessing", () => {
+    const html = "<title>Page</title><main><h1>Page</h1><p>Complete recorded content.</p></main>";
+    const { baseline, captures } = baselineFrom(html);
+
+    const missing = baselineFindings(
+      { ...spec, name: "Other", to: "https://example.test/other/" },
+      "hash",
+      baseline,
+      captures,
+      settings,
+    );
+    expect(missing).toEqual([expect.objectContaining({ ruleId: "RP400", severity: "warning" })]);
+
+    const stale = baselineFindings(spec, "different-hash", baseline, captures, settings);
+    expect(stale).toEqual([
+      expect.objectContaining({
+        ruleId: "RP400",
+        severity: "warning",
+        expected: "hash",
+        actual: "different-hash",
+      }),
+    ]);
+  });
+
+  it("skips comparison entirely when no baseline is configured", () => {
+    const html = "<title>Page</title><main><h1>Page</h1></main>";
+    const { captures } = baselineFrom(html);
+    expect(baselineFindings(spec, "hash", undefined, captures, settings)).toEqual([]);
+  });
+});
+
+describe("hreflangReciprocityFindings", () => {
+  const english = {
+    to: "https://example.test/loc-en/",
+    hreflangs: [
+      { hreflang: "en", href: "https://example.test/loc-en/" },
+      { hreflang: "th", href: "https://example.test/loc-th/" },
+    ],
+  };
+
+  it("flags an alternate whose partner does not link back", () => {
+    const findings = hreflangReciprocityFindings([
+      english,
+      {
+        to: "https://example.test/loc-th/",
+        hreflangs: [{ hreflang: "th", href: "https://example.test/loc-th/" }],
+      },
+    ]);
+    expect(findings[0]).toEqual([
+      expect.objectContaining({ ruleId: "RP503", severity: "warning" }),
+    ]);
+    expect(findings[1]).toEqual([]);
+  });
+
+  it("accepts reciprocal alternates and ignores unconfigured targets", () => {
+    const reciprocal = hreflangReciprocityFindings([
+      english,
+      {
+        to: "https://example.test/loc-th/",
+        hreflangs: [
+          { hreflang: "th", href: "https://example.test/loc-th/" },
+          { hreflang: "en", href: "https://example.test/loc-en/" },
+        ],
+      },
+    ]);
+    expect(reciprocal).toEqual([[], []]);
+
+    const unconfigured = hreflangReciprocityFindings([
+      {
+        to: "https://example.test/loc-en/",
+        hreflangs: [{ hreflang: "fr", href: "https://example.test/loc-fr/" }],
+      },
+    ]);
+    expect(unconfigured).toEqual([[]]);
   });
 });

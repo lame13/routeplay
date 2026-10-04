@@ -12,6 +12,41 @@ afterEach(() => {
 });
 
 describe("loadConfig", () => {
+  it("rejects duplicate transition names used for baseline identity", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "routeplay-config-"));
+    const file = path.join(directory, "config.json");
+    await writeFile(
+      file,
+      JSON.stringify({
+        baseUrl: "https://example.test",
+        transitions: [
+          { name: "same", from: "/", to: "/a/" },
+          { name: "same", from: "/", to: "/b/" },
+        ],
+      }),
+    );
+    await expect(loadConfig({ configPath: file })).rejects.toThrow(
+      "Transition names must be unique",
+    );
+  });
+
+  it.each([
+    { url: "https://example.test/", path: "/private" },
+    { url: "https://example.test/", domain: "example.test" },
+    { path: "private" },
+  ])("rejects ambiguous or invalid cookie locations: %j", async (location) => {
+    const directory = await mkdtemp(path.join(tmpdir(), "routeplay-config-"));
+    const file = path.join(directory, "config.json");
+    await writeFile(
+      file,
+      JSON.stringify({
+        baseUrl: "https://example.test",
+        transitions: [{ from: "/", to: "/a/" }],
+        browser: { cookies: [{ name: "session", value: "secret", ...location }] },
+      }),
+    );
+    await expect(loadConfig({ configPath: file })).rejects.toThrow("Invalid RoutePlay config");
+  });
   it("normalizes routes, applies defaults, and expands environment headers", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "routeplay-config-"));
     const file = path.join(directory, "routeplay.config.json");
@@ -243,6 +278,162 @@ describe("loadConfig", () => {
     await expect(
       loadConfig({ baseUrl: "https://example.test", from: "/", to: "/about", artifacts: "  " }),
     ).rejects.toThrow("Artifacts directory must not be empty.");
+  });
+
+  it("defaults and normalizes change-scoped paths and contract language", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "routeplay-config-"));
+    const file = path.join(directory, "routeplay.config.json");
+    await writeFile(
+      file,
+      JSON.stringify({
+        baseUrl: "https://example.test",
+        transitions: [
+          {
+            from: "/",
+            to: "/about",
+            paths: [" app/about/** ", "content/about/*.md"],
+            expect: { lang: " TH-th " },
+          },
+          { from: "/", to: "/contact" },
+        ],
+      }),
+    );
+    const config = await loadConfig({ configPath: file });
+
+    expect(config.transitions[0]?.paths).toEqual(["app/about/**", "content/about/*.md"]);
+    expect(config.transitions[0]?.expect).toMatchObject({ lang: "th-th" });
+    expect(config.transitions[1]?.paths).toEqual([]);
+  });
+
+  it("reads storage state, seeds cookies from the environment, and accepts CLI overrides", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "routeplay-config-"));
+    const file = path.join(directory, "routeplay.config.json");
+    process.env.ROUTEPLAY_TEST_TOKEN = "cookie-secret-value";
+    await writeFile(
+      file,
+      JSON.stringify({
+        baseUrl: "https://example.test",
+        browser: {
+          storageState: ".auth/user.json",
+          cookies: [
+            {
+              name: "session",
+              value: "${" + "ROUTEPLAY_TEST_TOKEN}",
+              domain: "example.test",
+              httpOnly: true,
+            },
+          ],
+        },
+        transitions: [{ from: "/", to: "/about" }],
+      }),
+    );
+    const config = await loadConfig({ configPath: file });
+
+    expect(config.browser.storageState).toBe(".auth/user.json");
+    expect(config.browser.cookies).toEqual([
+      {
+        name: "session",
+        value: "cookie-secret-value",
+        domain: "example.test",
+        httpOnly: true,
+      },
+    ]);
+
+    const overridden = await loadConfig({
+      configPath: file,
+      storageState: "other/state.json",
+    });
+    expect(overridden.browser.storageState).toBe("other/state.json");
+    await expect(
+      loadConfig({ baseUrl: "https://example.test", from: "/", to: "/about", storageState: "" }),
+    ).rejects.toThrow("Storage state path must not be empty.");
+  });
+
+  it("validates suppressions against the configured transitions", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "routeplay-config-"));
+    const file = path.join(directory, "routeplay.config.json");
+    await writeFile(
+      file,
+      JSON.stringify({
+        baseUrl: "https://example.test",
+        transitions: [{ name: "Home to pricing", from: "/", to: "/pricing" }],
+        ignore: [
+          {
+            ruleId: "rp108",
+            transition: "Home to pricing",
+            reason: "Tracked in SEO-142",
+            until: "2026-12-01",
+          },
+        ],
+      }),
+    );
+    const config = await loadConfig({ configPath: file });
+    expect(config.ignore).toEqual([
+      {
+        ruleId: "RP108",
+        transition: "Home to pricing",
+        reason: "Tracked in SEO-142",
+        until: "2026-12-01",
+      },
+    ]);
+
+    const write = async (ignore: unknown, name = "ignore.json"): Promise<string> => {
+      const target = path.join(directory, name);
+      await writeFile(
+        target,
+        JSON.stringify({
+          baseUrl: "https://example.test",
+          transitions: [{ name: "Home to pricing", from: "/", to: "/pricing" }],
+          ignore,
+        }),
+      );
+      return target;
+    };
+
+    await expect(
+      loadConfig({
+        configPath: await write([{ ruleId: "RP108", transition: "Unknown", reason: "Why not" }]),
+      }),
+    ).rejects.toThrow("does not match any configured transition");
+    await expect(
+      loadConfig({
+        configPath: await write([{ ruleId: "seo", reason: "Too vague" }], "rule.json"),
+      }),
+    ).rejects.toThrow("Use a rule ID like RP108");
+    await expect(
+      loadConfig({
+        configPath: await write(
+          [{ ruleId: "RP108", reason: "Typo date", until: "2026-02-31" }],
+          "date.json",
+        ),
+      }),
+    ).rejects.toThrow("Use a real calendar date");
+  });
+
+  it("applies repeat defaults and rejects out-of-range repeat counts", async () => {
+    const defaults = await loadConfig({
+      baseUrl: "https://example.test",
+      from: "/",
+      to: "/about",
+    });
+    expect(defaults.repeat).toBe(1);
+    expect(defaults.ignore).toEqual([]);
+    expect(defaults.browser.cookies).toEqual([]);
+
+    const configured = await loadConfig({
+      baseUrl: "https://example.test",
+      from: "/",
+      to: "/about",
+      repeat: 3,
+    });
+    expect(configured.repeat).toBe(3);
+
+    await expect(
+      loadConfig({ baseUrl: "https://example.test", from: "/", to: "/about", repeat: 6 }),
+    ).rejects.toThrow("Repeat must be an integer between 1 and 5.");
+    await expect(
+      loadConfig({ baseUrl: "https://example.test", from: "/", to: "/about", repeat: 1.5 }),
+    ).rejects.toThrow("Repeat must be an integer between 1 and 5.");
   });
 });
 
