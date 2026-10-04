@@ -4,6 +4,33 @@ All notable changes to RoutePlay are documented here. The project follows Semant
 
 ## Unreleased
 
+## 0.5.0 - 2026-10-04
+
+### Added
+
+- Added baseline recording and comparison: `routeplay snapshot` records the current behavior of every complete transition, `check --baseline` reports drift per surface with the `RP4xx` rule family, and `check --update-baseline` re-records deliberately instead of comparing.
+- Added authenticated captures with `browser.storageState`, `--storage-state`, and environment-backed `browser.cookies`. Cookies retain browser scoping rules, and credential values are redacted from reports, text artifacts, and baselines.
+- Added change-scoped runs: per-transition `paths` globs with `--only-changed` and `--diff-base` select the transitions a diff touches, and reports record the ref, matched files, and skipped transitions.
+- Added `--repeat` (and `repeat`) to report fields that change between identical captures (`RP601`) and repeated captures that fail (`RP602`).
+- Added expiring suppressions through `ignore`, with suppressed evidence retained in JSON and HTML and `RP006` self-reporting an expired exception.
+- Added document language and hreflang semantics: `<html lang>` and alternate links are compared across surfaces (`RP501`, `RP502`), required by `expect.lang` (`RP309`), and checked for reciprocity between configured destinations (`RP503`).
+
+### Changed
+
+- Reports, SARIF, and the HTML matrix include run scope, repeat settings, and suppressed findings; suppressed findings no longer fail a run or appear in SARIF.
+- `snapshot` refuses to write a baseline when any transition is incomplete, and reports the findings it is freezing.
+
+### Fixed
+
+- Redacted reflected storage-state credentials, including structured local-storage values, and compared fresh captures with the same redaction as baselines.
+- Preserved invalid existing baselines during updates, validated unique transition names, and included source routes, anchor/readiness selectors, and stability settings in baseline compatibility checks.
+- Included both sides of Git renames and preserved Unicode, whitespace, and newline filenames in change-scoped runs, including from repository subdirectories.
+- Honored cookie paths, rejected ambiguous cookie scopes, and closed browser contexts when cookie initialization fails.
+- Included run scope and settings in SARIF, checked hreflang reciprocity against final destination URLs, and retained artifacts for failures found by that run-level check.
+- Updated the project homepage to `https://nikocodes.com/software/routeplay/` and replaced obsolete npm publishing instructions with the Trusted Publishing release process.
+- Aligned the Docker browser image with the pinned Playwright dependency so packaged browser captures can launch.
+- Updated the locked transitive `undici` dependency to a patched release after the package audit reported upstream advisories.
+
 ## 0.4.0 - 2026-09-16
 
 ### Added

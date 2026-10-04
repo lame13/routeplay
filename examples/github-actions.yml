@@ -34,6 +34,9 @@ jobs:
         run: |
           test -n "$ROUTEPLAY_BASE_URL"
           npx routeplay check --config routeplay.config.json --base-url "$ROUTEPLAY_BASE_URL" --format sarif --output routeplay.sarif --artifacts routeplay-artifacts
+          # Add `--baseline routeplay.baseline.json` to gate against recorded behavior,
+          # For a separate pull_request job, fetch the base history (checkout fetch-depth: 0)
+          # and add --only-changed --diff-base <base-commit>. This deployment job has no PR base.
       - uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:

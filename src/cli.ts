@@ -4,6 +4,14 @@ import { access, mkdir, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { Command, Option } from "commander";
+import {
+  baselineFromReport,
+  DEFAULT_BASELINE_PATH,
+  loadBaseline,
+  mergeBaseline,
+  readBaselineIfPresent,
+  writeBaseline,
+} from "./baseline.js";
 import { launchBrowser } from "./browser.js";
 import { defaultConfig, loadConfig, validateConfigFile } from "./config.js";
 import { htmlReport } from "./reporters/html.js";
@@ -11,6 +19,7 @@ import { jsonReport } from "./reporters/json.js";
 import { sarifReport } from "./reporters/sarif.js";
 import { terminalReport } from "./reporters/terminal.js";
 import { runRoutePlay, VERSION } from "./run.js";
+import { changedFiles, selectTransitions } from "./scope.js";
 import type { CheckOptions, RoutePlayReport } from "./types.js";
 
 function collect(value: string, previous: string[]): string[] {
@@ -18,11 +27,16 @@ function collect(value: string, previous: string[]): string[] {
 }
 
 interface CliCheckOptions
-  extends Omit<CheckOptions, "configPath" | "headers" | "concurrency" | "retries"> {
+  extends Omit<
+    CheckOptions,
+    "configPath" | "headers" | "concurrency" | "retries" | "repeat" | "updateBaseline"
+  > {
   config?: string;
   header?: string[];
   concurrency?: string;
   retries?: string;
+  repeat?: string;
+  updateBaseline?: string | boolean;
 }
 
 function countOption(value: string | undefined, label: string): number | undefined {
@@ -57,21 +71,79 @@ async function writeOutput(output: string, contents: string): Promise<void> {
   process.stderr.write(`Report written to ${absolute}\n`);
 }
 
-async function check(options: CheckOptions): Promise<void> {
+async function resolveConfigPath(options: CheckOptions): Promise<CheckOptions> {
   const defaultPath = path.resolve("routeplay.config.json");
-  const resolvedOptions = {
-    ...options,
-    ...(!options.configPath && !options.baseUrl && (await fileExists(defaultPath))
-      ? { configPath: defaultPath }
-      : {}),
-  };
-  const config = await loadConfig(resolvedOptions);
+  if (options.configPath || options.baseUrl || !(await fileExists(defaultPath))) return options;
+  return { ...options, configPath: defaultPath };
+}
+
+async function applyChangeScope(
+  options: CheckOptions,
+  config: Awaited<ReturnType<typeof loadConfig>>,
+): Promise<void> {
+  if (!options.onlyChanged) return;
+  if (!options.diffBase) {
+    throw new Error(
+      "--only-changed requires --diff-base <git-ref>, for example --diff-base origin/main.",
+    );
+  }
+  const files = await changedFiles({ base: options.diffBase });
+  const { selected, skipped } = selectTransitions(config.transitions, files);
+  config.transitions = selected;
+  config.scope = { diffBase: options.diffBase, changedFiles: files, skipped };
+  if (selected.length === 0) {
+    process.stderr.write(
+      `RoutePlay: no configured transition matched ${files.length} changed file(s) since ${options.diffBase}.\n`,
+    );
+  }
+}
+
+async function check(options: CheckOptions): Promise<void> {
+  const config = await loadConfig(await resolveConfigPath(options));
+  await applyChangeScope(options, config);
+  if (options.baseline && options.updateBaseline === undefined) {
+    config.baseline = await loadBaseline(options.baseline);
+  }
   const report = await runRoutePlay(config);
+  if (options.updateBaseline !== undefined) {
+    const target =
+      options.updateBaseline || options.baseline || path.resolve(DEFAULT_BASELINE_PATH);
+    const { baseline: fresh, skipped } = baselineFromReport(report, config);
+    const merged = mergeBaseline(await readBaselineIfPresent(target), fresh);
+    const written = await writeBaseline(target, merged.baseline, config);
+    process.stderr.write(
+      `Baseline updated: ${written} (${fresh.transitions.length} recorded, ${merged.replaced} replaced, ${merged.retained} retained)\n`,
+    );
+    if (skipped.length > 0) {
+      process.stderr.write(
+        `RoutePlay: incomplete transitions were not recorded: ${skipped.join(", ")}\n`,
+      );
+    }
+  }
   const format = options.format ?? "terminal";
   const contents = render(report, format);
   if (options.output) await writeOutput(options.output, `${contents}\n`);
   else process.stdout.write(`${contents}\n`);
   process.exitCode = report.summary.incomplete > 0 ? 2 : report.passed ? 0 : 1;
+}
+
+async function snapshot(options: CheckOptions & { output?: string }): Promise<void> {
+  const config = await loadConfig(await resolveConfigPath(options));
+  const report = await runRoutePlay(config);
+  const { baseline, skipped } = baselineFromReport(report, config);
+  if (baseline.transitions.length === 0) {
+    throw new Error("No transition could be captured, so no baseline was written.");
+  }
+  if (skipped.length > 0) {
+    throw new Error(
+      `No baseline was written because these transitions were incomplete: ${skipped.join(", ")}.`,
+    );
+  }
+  const written = await writeBaseline(options.output ?? DEFAULT_BASELINE_PATH, baseline, config);
+  process.stdout.write(`${terminalReport(report)}\n`);
+  process.stdout.write(
+    `\nRecorded ${baseline.transitions.length} transition(s) in ${written}\nFrozen findings: ${report.summary.errors} error(s), ${report.summary.warnings} warning(s). Future runs compare against this state.\n`,
+  );
 }
 
 async function initConfig(file: string, force: boolean): Promise<void> {
@@ -135,7 +207,16 @@ export async function main(argv = process.argv): Promise<void> {
     .option("--header <name=value>", "origin-scoped request header; repeatable", collect, [])
     .option("--concurrency <count>", "transitions to capture at once, 1-8")
     .option("--retries <count>", "extra attempts for failing transitions, 0-3")
+    .option("--repeat <count>", "captures per transition for instability detection, 1-5")
     .option("--artifacts <dir>", "write screenshots, DOM, and runtime events for failures")
+    .option("--storage-state <path>", "Playwright storage state file for authenticated routes")
+    .option("--baseline <path>", "compare the run against a recorded baseline")
+    .option(
+      "--update-baseline [path]",
+      "rewrite the baseline from this run instead of comparing against it",
+    )
+    .option("--only-changed", "run only transitions whose configured paths changed")
+    .option("--diff-base <ref>", "Git ref used by --only-changed")
     .addOption(
       new Option("--fail-on <level>", "failure threshold").choices(["error", "warning", "never"]),
     )
@@ -146,17 +227,55 @@ export async function main(argv = process.argv): Promise<void> {
     )
     .option("-o, --output <path>", "write the report to a file")
     .action(async (options: CliCheckOptions) => {
-      const { config, header, concurrency, retries, ...rest } = options;
+      const { config, header, concurrency, retries, repeat, updateBaseline, ...rest } = options;
       const concurrencyCount = countOption(concurrency, "--concurrency");
       const retryCount = countOption(retries, "--retries");
+      const repeatCount = countOption(repeat, "--repeat");
       await check({
         ...rest,
         ...(config ? { configPath: config } : {}),
         ...(header ? { headers: header } : {}),
         ...(concurrencyCount === undefined ? {} : { concurrency: concurrencyCount }),
         ...(retryCount === undefined ? {} : { retries: retryCount }),
+        ...(repeatCount === undefined ? {} : { repeat: repeatCount }),
+        ...(typeof updateBaseline === "string" || updateBaseline === true
+          ? { updateBaseline: updateBaseline === true ? "" : updateBaseline }
+          : {}),
       });
     });
+
+  program
+    .command("snapshot")
+    .description("Record the current route behavior as the baseline future runs compare against")
+    .option("-c, --config <path>", "JSON config path")
+    .option("--base-url <url>", "base URL for one-off mode")
+    .option("--from <path-or-url>", "source route for one-off mode")
+    .option("--to <path-or-url>", "destination route for one-off mode")
+    .option("--selector <css>", "exact anchor selector for one-off mode")
+    .option("--header <name=value>", "origin-scoped request header; repeatable", collect, [])
+    .option("--storage-state <path>", "Playwright storage state file for authenticated routes")
+    .option("--artifacts <dir>", "write screenshots, DOM, and runtime events for failures")
+    .option("-o, --output <path>", "baseline file to write", DEFAULT_BASELINE_PATH)
+    .action(
+      async (options: {
+        config?: string;
+        header?: string[];
+        output?: string;
+        baseUrl?: string;
+        from?: string;
+        to?: string;
+        selector?: string;
+        storageState?: string;
+        artifacts?: string;
+      }) => {
+        const { config, header, ...rest } = options;
+        await snapshot({
+          ...rest,
+          ...(config ? { configPath: config } : {}),
+          ...(header ? { headers: header } : {}),
+        });
+      },
+    );
 
   program
     .command("init")

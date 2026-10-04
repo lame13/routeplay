@@ -10,6 +10,7 @@ import {
 import { extractSemantics, ignoredMainSelectors } from "./extract.js";
 import type {
   Capture,
+  CookieSeed,
   HttpEvidence,
   NavigationMode,
   RoutePlayConfig,
@@ -46,8 +47,36 @@ function importantRequest(request: Request): boolean {
   return ["document", "script", "stylesheet", "xhr", "fetch"].includes(request.resourceType());
 }
 
+type BrowserCookie = Parameters<BrowserContext["addCookies"]>[0][number];
+
+/**
+ * Cookies use Chromium's domain, path, and secure rules. The default is the audited hostname;
+ * explicit URL/domain settings and storage state retain their browser cookie semantics.
+ */
+function cookieParams(cookie: CookieSeed, baseUrl: string): BrowserCookie {
+  const shared = {
+    name: cookie.name,
+    value: cookie.value,
+    ...(cookie.httpOnly === undefined ? {} : { httpOnly: cookie.httpOnly }),
+    ...(cookie.secure === undefined ? {} : { secure: cookie.secure }),
+    ...(cookie.sameSite === undefined ? {} : { sameSite: cookie.sameSite }),
+    ...(cookie.expires === undefined ? {} : { expires: cookie.expires }),
+  };
+  if (cookie.url !== undefined) return { ...shared, url: cookie.url };
+  if (cookie.domain !== undefined) {
+    return { ...shared, domain: cookie.domain, path: cookie.path ?? "/" };
+  }
+  const url = new URL(baseUrl);
+  return {
+    ...shared,
+    domain: url.hostname,
+    path: cookie.path ?? "/",
+    secure: cookie.secure ?? url.protocol === "https:",
+  };
+}
+
 async function createContext(browser: Browser, config: RoutePlayConfig): Promise<BrowserContext> {
-  return browser.newContext({
+  const context = await browser.newContext({
     locale: config.browser.locale,
     timezoneId: config.browser.timezoneId,
     viewport: config.browser.viewport,
@@ -55,7 +84,23 @@ async function createContext(browser: Browser, config: RoutePlayConfig): Promise
     reducedMotion: "reduce",
     colorScheme: "light",
     ...(config.browser.userAgent ? { userAgent: config.browser.userAgent } : {}),
+    ...(config.storageStateData
+      ? { storageState: config.storageStateData }
+      : config.browser.storageState
+        ? { storageState: config.browser.storageState }
+        : {}),
   });
+  try {
+    if (config.browser.cookies.length > 0) {
+      await context.addCookies(
+        config.browser.cookies.map((cookie) => cookieParams(cookie, config.baseUrl)),
+      );
+    }
+    return context;
+  } catch (error) {
+    await context.close();
+    throw error;
+  }
 }
 
 interface PausedRequest {
@@ -271,8 +316,30 @@ async function pageSignature(
       })
       .filter(Boolean);
 
+    const hreflangs = new Map<string, { hreflang: string; href: string }>();
+    for (const element of Array.from(
+      document.querySelectorAll('link[rel~="alternate" i][hreflang]'),
+    )) {
+      const hreflang = normalize(element.getAttribute("hreflang") ?? "").toLocaleLowerCase();
+      const raw = (element.getAttribute("href") ?? "").trim();
+      if (!hreflang || !raw) continue;
+      try {
+        const url = new URL(raw, document.baseURI);
+        if (!/^https?:$/.test(url.protocol)) continue;
+        hreflangs.set(`${hreflang}\u0000${url.href}`, { hreflang, href: url.href });
+      } catch {
+        // Unresolvable alternates are not crawlable.
+      }
+    }
+    const sortedHreflangs = [...hreflangs.values()].sort(
+      (left, right) =>
+        left.hreflang.localeCompare(right.hreflang) || left.href.localeCompare(right.href),
+    );
+
     return JSON.stringify({
       url: location.href,
+      lang: normalize(document.documentElement.getAttribute("lang") ?? "").toLocaleLowerCase(),
+      hreflangs: sortedHreflangs,
       titles: texts("title"),
       descriptions: texts('meta[name="description" i][content]', "content"),
       canonicals: sortStrings(canonicals),

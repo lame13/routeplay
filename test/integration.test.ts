@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Browser } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { baselineFromReport, loadBaseline, writeBaseline } from "../src/baseline.js";
 import { launchBrowser } from "../src/browser.js";
 import { loadConfig } from "../src/config.js";
 import { runRoutePlay } from "../src/run.js";
@@ -176,7 +177,7 @@ describe("browser integration", () => {
     config.artifacts = artifactsDir;
     const report = await runRoutePlay(config, browser);
 
-    expect(report.run).toEqual({ concurrency: 1, retries: 1 });
+    expect(report.run).toEqual({ concurrency: 1, retries: 1, repeat: 1 });
     expect(report.results[0]?.attempts).toBe(2);
     expect(report.results[0]?.complete).toBe(false);
     expect(report.results[0]?.findings).toContainEqual(
@@ -318,7 +319,7 @@ describe("browser integration", () => {
     const config = await loadConfig({ configPath: file });
     const report = await runRoutePlay(config, browser);
 
-    expect(report.run).toEqual({ concurrency: 3, retries: 0 });
+    expect(report.run).toEqual({ concurrency: 3, retries: 0, repeat: 1 });
     expect(report.results.map((result) => result.name)).toEqual(["First", "Second", "Third"]);
     expect(report.results.every((result) => result.complete)).toBe(true);
     expect(report.results[0]?.attempts).toBe(1);
@@ -340,5 +341,235 @@ describe("browser integration", () => {
 
     await expect(runRoutePlay(config, browser)).rejects.toThrow();
     expect(browser.contexts()).toHaveLength(0);
+  });
+
+  it("captures an authenticated route with a seeded cookie", async () => {
+    const anonymous = await loadConfig({ baseUrl, from: "/", to: "/private/" });
+    anonymous.compare.minSourceTextLength = 20;
+    const failed = await runRoutePlay(anonymous, browser);
+    expect(failed.results[0]?.findings).toContainEqual(
+      expect.objectContaining({ ruleId: "RP204", phase: "server", severity: "error" }),
+    );
+    expect(failed.passed).toBe(false);
+
+    const authenticated = await loadConfig({ baseUrl, from: "/", to: "/private/" });
+    authenticated.compare.minSourceTextLength = 20;
+    authenticated.browser.cookies = [{ name: "routeplay-session", value: "fixture-cookie-secret" }];
+    const passed = await runRoutePlay(authenticated, browser);
+    expect(passed.results[0]?.complete).toBe(true);
+    expect(passed.passed).toBe(true);
+    expect(JSON.stringify(passed)).not.toContain("fixture-cookie-secret");
+  });
+
+  it("reuses a Playwright storage state file and rejects a missing one", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "routeplay-storage-"));
+    const state = path.join(directory, "state.json");
+    const host = new URL(baseUrl).hostname;
+    await writeFile(
+      state,
+      JSON.stringify({
+        cookies: [
+          {
+            name: "routeplay-session",
+            value: "storage-state-secret",
+            domain: host,
+            path: "/",
+            expires: -1,
+            httpOnly: false,
+            secure: false,
+            sameSite: "Lax",
+          },
+        ],
+        origins: [],
+      }),
+    );
+    const config = await loadConfig({ baseUrl, from: "/", to: "/private/" });
+    config.compare.minSourceTextLength = 20;
+    config.browser.storageState = state;
+    const report = await runRoutePlay(config, browser);
+    expect(report.passed).toBe(true);
+
+    const missing = await loadConfig({ baseUrl, from: "/", to: "/good/" });
+    missing.browser.storageState = path.join(directory, "missing.json");
+    await expect(runRoutePlay(missing, browser)).rejects.toThrow("Storage state file not found");
+  });
+
+  it("compares a run against a recorded baseline and reports later drift", async () => {
+    const config = await loadConfig({ baseUrl, from: "/", to: "/drifting/" });
+    config.compare.minSourceTextLength = 20;
+
+    const recorded = await runRoutePlay(config, browser);
+    const { baseline, skipped } = baselineFromReport(recorded, config);
+    expect(skipped).toEqual([]);
+    expect(baseline.transitions).toHaveLength(1);
+
+    config.baseline = baseline;
+    const matched = await runRoutePlay(config, browser);
+    expect(
+      matched.results[0]?.findings.filter((finding) => finding.ruleId.startsWith("RP4")),
+    ).toEqual([]);
+    expect(matched.passed).toBe(true);
+
+    const drifted = await runRoutePlay(config, browser);
+    expect(drifted.results[0]?.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ruleId: "RP402",
+          comparison: "baseline-cold",
+          severity: "error",
+        }),
+        expect.objectContaining({ ruleId: "RP407", severity: "error" }),
+      ]),
+    );
+    expect(drifted.passed).toBe(false);
+  });
+
+  it("redacts reflected storage credentials in reports, artifacts, and reusable baselines", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "routeplay-storage-redaction-"));
+    const state = path.join(directory, "state.json");
+    const cookieSecret = "reflected-storage-cookie";
+    const localSecret = "reflected-local-storage";
+    await writeFile(
+      state,
+      JSON.stringify({
+        cookies: [
+          {
+            name: "session",
+            value: cookieSecret,
+            domain: new URL(baseUrl).hostname,
+            path: "/",
+            expires: -1,
+            httpOnly: true,
+            secure: false,
+            sameSite: "Lax",
+          },
+        ],
+        origins: [
+          {
+            origin: baseUrl,
+            localStorage: [{ name: "session", value: JSON.stringify({ token: localSecret }) }],
+          },
+        ],
+      }),
+    );
+    const config = await loadConfig({
+      baseUrl,
+      from: "/reflect-state/",
+      to: "/reflect-state/",
+      storageState: state,
+      artifacts: directory,
+      failOn: "warning",
+    });
+    const report = await runRoutePlay(config, browser);
+    expect(report.summary.incomplete).toBe(0);
+    expect(report.summary.warnings).toBeGreaterThan(0);
+    expect(JSON.stringify(report)).not.toContain(cookieSecret);
+    expect(JSON.stringify(report)).not.toContain(localSecret);
+    expect(JSON.stringify(report)).toContain("[REDACTED]");
+    const artifacts = report.results[0]?.artifacts ?? {};
+    expect(Object.keys(artifacts).length).toBeGreaterThan(0);
+    for (const file of Object.values(artifacts).filter((file) => !file.endsWith(".png"))) {
+      const contents = await readFile(path.join(directory, file), "utf8");
+      expect(contents).not.toContain(cookieSecret);
+      expect(contents).not.toContain(localSecret);
+    }
+    const baselineFile = path.join(directory, "baseline.json");
+    await writeBaseline(baselineFile, baselineFromReport(report, config).baseline, config);
+    config.baseline = await loadBaseline(baselineFile);
+    const compared = await runRoutePlay(config, browser);
+    expect(
+      compared.results[0]?.findings.filter((finding) => finding.ruleId.startsWith("RP4")),
+    ).toEqual([]);
+    expect(browser.contexts()).toHaveLength(0);
+  });
+
+  it("honors a default-host cookie path and closes contexts after invalid cookie seeds", async () => {
+    const config = await loadConfig({ baseUrl, from: "/", to: "/private/" });
+    config.browser.cookies = [
+      { name: "routeplay-session", value: "path-secret", path: "/unrelated/" },
+    ];
+    const report = await runRoutePlay(config, browser);
+    expect(report.passed).toBe(false);
+    config.browser.cookies = [{ name: "session", value: "bad-cookie", expires: -2 }];
+    const failed = await runRoutePlay(config, browser);
+    expect(failed.summary.incomplete).toBe(1);
+    expect(browser.contexts()).toHaveLength(0);
+  });
+
+  it("reports fields that change between repeated captures", async () => {
+    const config = await loadConfig({ baseUrl, from: "/", to: "/random/" });
+    config.repeat = 2;
+    config.browser.settleMs = 100;
+    const report = await runRoutePlay(config, browser);
+
+    expect(report.run.repeat).toBe(2);
+    expect(report.results[0]?.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ ruleId: "RP601", phase: "cold", severity: "warning" }),
+      ]),
+    );
+  });
+
+  it("stays quiet about instability on a deterministic route", async () => {
+    const config = await loadConfig({ baseUrl, from: "/", to: "/good/" });
+    config.repeat = 2;
+    config.compare.minSourceTextLength = 20;
+    const report = await runRoutePlay(config, browser);
+
+    expect(
+      report.results[0]?.findings.filter((finding) => finding.ruleId.startsWith("RP6")),
+    ).toEqual([]);
+    expect(report.passed).toBe(true);
+  });
+
+  it("suppresses configured findings while keeping the evidence", async () => {
+    const config = await loadConfig({ baseUrl, from: "/", to: "/stale/" });
+    config.ignore = [{ ruleId: "RP104", reason: "Tracked in SEO-142" }];
+    const report = await runRoutePlay(config, browser);
+
+    const suppressed =
+      report.results[0]?.findings.filter((finding) => finding.suppressed === true) ?? [];
+    expect(suppressed.length).toBeGreaterThan(0);
+    expect(suppressed.every((finding) => finding.suppressedReason === "Tracked in SEO-142")).toBe(
+      true,
+    );
+    expect(report.summary.suppressed).toBe(suppressed.length);
+    expect(report.passed).toBe(true);
+  });
+
+  it("restores findings whose suppression expired", async () => {
+    const config = await loadConfig({ baseUrl, from: "/", to: "/stale/" });
+    config.ignore = [{ ruleId: "RP104", reason: "Expired exception", until: "2020-01-01" }];
+    const report = await runRoutePlay(config, browser);
+
+    expect(report.results[0]?.findings).toContainEqual(
+      expect.objectContaining({ ruleId: "RP006", severity: "warning" }),
+    );
+    expect(report.results[0]?.findings).toContainEqual(
+      expect.objectContaining({ ruleId: "RP104", severity: "error" }),
+    );
+    expect(report.passed).toBe(false);
+  });
+
+  it("flags a one-way hreflang alternate between configured routes", async () => {
+    const english = await loadConfig({ baseUrl, from: "/", to: "/loc-en/" });
+    const thai = await loadConfig({ baseUrl, from: "/", to: "/loc-th" });
+    english.compare.minSourceTextLength = 20;
+    english.failOn = "warning";
+    english.artifacts = await mkdtemp(path.join(tmpdir(), "routeplay-hreflang-"));
+    const englishTransition = english.transitions[0];
+    const thaiTransition = thai.transitions[0];
+    if (!englishTransition || !thaiTransition) throw new Error("Expected configured transitions.");
+    thaiTransition.expectedFinalUrl = `${baseUrl}/loc-th/`;
+    english.transitions = [englishTransition, thaiTransition];
+
+    const report = await runRoutePlay(english, browser);
+    expect(report.results[0]?.findings).toContainEqual(
+      expect.objectContaining({ ruleId: "RP503", severity: "warning" }),
+    );
+    expect(report.results[1]?.findings.filter((finding) => finding.ruleId === "RP503")).toEqual([]);
+    expect(report.passed).toBe(false);
+    expect(report.results[0]?.artifacts?.["cold.html"]).toBeDefined();
+    expect(report.results[1]?.artifacts).toBeUndefined();
   });
 });

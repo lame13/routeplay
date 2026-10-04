@@ -41,4 +41,26 @@ describe("routeplay.schema.json", () => {
     });
     expect(schema.properties.artifacts).toMatchObject({ type: "string", minLength: 1 });
   });
+
+  it("documents baselines, sessions, repeats, and suppressions", async () => {
+    const schema = JSON.parse(
+      await readFile(new URL("../routeplay.schema.json", import.meta.url), "utf8"),
+    ) as {
+      properties: Record<string, { properties?: Record<string, JsonSchemaProperty> }>;
+    };
+
+    const browser = schema.properties.browser?.properties ?? {};
+    const transition = schema.properties.transitions as unknown as {
+      items: { properties: Record<string, JsonSchemaProperty> };
+    };
+    expect(Object.keys(browser)).toEqual(expect.arrayContaining(["cookies", "storageState"]));
+    expect(Object.keys(transition.items.properties)).toContain("paths");
+    expect(schema.properties.repeat).toMatchObject({
+      type: "integer",
+      minimum: 1,
+      maximum: 5,
+      default: 1,
+    });
+    expect(schema.properties.ignore).toMatchObject({ type: "array" });
+  });
 });

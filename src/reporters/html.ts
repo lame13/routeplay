@@ -1,4 +1,4 @@
-import { severityFails } from "../policy.js";
+import { failsPolicy } from "../policy.js";
 import type { Finding, RoutePlayReport } from "../types.js";
 
 function escapeHtml(value: unknown): string {
@@ -29,12 +29,21 @@ export function htmlReport(report: RoutePlayReport): string {
     .map((result) => {
       const findings = result.findings
         .filter((finding) => !(finding.severity === "info" && finding.ruleId === "RP004"))
-        .map(
-          (finding) => `<li class="finding ${finding.severity}">
-            <div><span class="badge">${escapeHtml(finding.severity)}</span> <b>${escapeHtml(finding.ruleId)}</b> ${escapeHtml(finding.message)}</div>
+        .map((finding) => {
+          const suppressed = finding.suppressed === true;
+          const badge = suppressed
+            ? '<span class="badge" style="background:#e2e8f0;color:#647089">suppressed</span>'
+            : `<span class="badge">${escapeHtml(finding.severity)}</span>`;
+          const ignored =
+            suppressed && finding.suppressedReason
+              ? `<div class="hint">Ignored: ${escapeHtml(finding.suppressedReason)}</div>`
+              : "";
+          return `<li class="finding ${finding.severity}"${suppressed ? ' style="opacity:.72"' : ""}>
+            <div>${badge} <b>${escapeHtml(finding.ruleId)}</b> ${escapeHtml(finding.message)}</div>
+            ${ignored}
             ${evidence(finding)}
-          </li>`,
-        )
+          </li>`;
+        })
         .join("");
       const captures = result.captures;
       const metrics = captures
@@ -45,11 +54,11 @@ export function htmlReport(report: RoutePlayReport): string {
             <span>Source links <b>${captures.server.semantic.links.length}</b></span>
             <span>Cold links <b>${captures.cold.semantic.links.length}</b></span>
             <span>Transition links <b>${captures.transition.semantic.links.length}</b></span>
+            <span>Language <b>${escapeHtml(captures.cold.semantic.lang || "unset")}</b></span>
+            <span>Hreflang alternates <b>${captures.cold.semantic.hreflangs.length}</b></span>
           </div>`
         : "";
-      const passed =
-        result.complete &&
-        !result.findings.some((finding) => severityFails(finding.severity, report.policy.failOn));
+      const passed = result.complete && !failsPolicy(result.findings, report.policy.failOn);
       const artifacts = Object.entries(result.artifacts ?? {});
       const artifactList =
         artifacts.length === 0
@@ -71,5 +80,5 @@ export function htmlReport(report: RoutePlayReport): string {
 <title>RoutePlay report · ${status}</title>
 <style>
 :root{color-scheme:light;--bg:#f5f7fb;--ink:#172033;--muted:#647089;--line:#dce2ec;--red:#be123c;--amber:#a16207;--green:#15803d;--blue:#2563eb}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.wrap{max-width:1040px;margin:0 auto;padding:48px 24px}h1,h2{line-height:1.15;margin:0}.lead{display:flex;justify-content:space-between;gap:24px;align-items:end;margin-bottom:28px}.summary{color:var(--muted);margin-top:8px}.overall{font-weight:800;font-size:20px;color:${report.passed ? "var(--green)" : "var(--red)"}}.card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px;margin:16px 0;box-shadow:0 5px 18px rgba(24,35,57,.05)}.card header{display:flex;justify-content:space-between;gap:16px}.route,.mode{color:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;margin-top:7px}.result,.badge{border-radius:999px;padding:3px 9px;text-transform:uppercase;font-size:11px;font-weight:800;letter-spacing:.04em}.result.pass{background:#dcfce7;color:var(--green)}.result.fail{background:#ffe4e6;color:var(--red)}.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin:18px 0}.metrics span{background:#f7f9fc;border:1px solid #e7ebf2;border-radius:8px;padding:8px 10px;color:var(--muted)}ul{padding:0;margin:18px 0 0;list-style:none}.finding{padding:14px 0;border-top:1px solid var(--line)}.finding:first-child{border-top:0}.finding.error .badge{background:#ffe4e6;color:var(--red)}.finding.warning .badge{background:#fef3c7;color:var(--amber)}.finding.info .badge{background:#dbeafe;color:var(--blue)}code{white-space:pre-wrap;overflow-wrap:anywhere}.hint{color:var(--muted);margin-top:4px}.empty{color:var(--green)}footer{color:var(--muted);margin-top:30px;font-size:13px}a{color:var(--blue)}</style></head>
-<body><main class="wrap"><div class="lead"><div><h1>RoutePlay ${escapeHtml(report.tool.version)}</h1><div class="summary">${report.summary.transitions} transitions · ${report.summary.errors} errors · ${report.summary.warnings} warnings · ${(report.durationMs / 1000).toFixed(1)}s</div></div><div class="overall">${status}</div></div>${cards}<footer>Generated ${escapeHtml(report.finishedAt)} · <a href="https://nikom.work">nikom.work</a></footer></main></body></html>`;
+<body><main class="wrap"><div class="lead"><div><h1>RoutePlay ${escapeHtml(report.tool.version)}</h1><div class="summary">${report.summary.transitions} transitions · ${report.summary.errors} errors · ${report.summary.warnings} warnings${report.summary.suppressed > 0 ? ` · ${report.summary.suppressed} suppressed` : ""} · ${(report.durationMs / 1000).toFixed(1)}s</div>${report.scope ? `<div class="summary">Scoped to changes since <code>${escapeHtml(report.scope.diffBase)}</code>: ${report.scope.changedFiles.length} file(s), ${report.scope.skipped} transition(s) skipped</div>` : ""}${report.run.repeat > 1 ? `<div class="summary">${report.run.repeat} captures per transition</div>` : ""}</div><div class="overall">${status}</div></div>${cards}<footer>Generated ${escapeHtml(report.finishedAt)} · <a href="https://nikocodes.com/software/routeplay/">RoutePlay</a></footer></main></body></html>`;
 }

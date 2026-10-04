@@ -18,7 +18,7 @@ const report: RoutePlayReport = {
     viewport: { width: 1440, height: 900 },
   },
   policy: { failOn: "error" },
-  run: { concurrency: 1, retries: 0 },
+  run: { concurrency: 1, retries: 0, repeat: 1 },
   results: [
     {
       name: "Unsafe <script>alert(1)</script>",
@@ -39,7 +39,16 @@ const report: RoutePlayReport = {
       complete: true,
     },
   ],
-  summary: { transitions: 1, passed: 0, failed: 1, incomplete: 0, errors: 1, warnings: 0, info: 0 },
+  summary: {
+    transitions: 1,
+    passed: 0,
+    failed: 1,
+    incomplete: 0,
+    errors: 1,
+    warnings: 0,
+    info: 0,
+    suppressed: 0,
+  },
   passed: false,
 };
 
@@ -62,6 +71,18 @@ describe("reporters", () => {
     };
     expect(parsed.version).toBe("2.1.0");
     expect(parsed.runs[0]?.results[0]?.ruleId).toBe("RP104");
+  });
+
+  it("keeps scope and run settings in SARIF when no transitions ran", () => {
+    const scoped = {
+      ...report,
+      results: [],
+      scope: { diffBase: "main", changedFiles: ["README.md"], skipped: 1 },
+    };
+    const parsed = JSON.parse(sarifReport(scoped));
+    expect(parsed.runs[0].results).toEqual([]);
+    expect(parsed.runs[0].properties.scope).toEqual(scoped.scope);
+    expect(parsed.runs[0].properties.run).toEqual(scoped.run);
   });
 
   it("surfaces retry counts and artifact paths", () => {
