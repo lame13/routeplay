@@ -63,7 +63,7 @@
     "cheerio": "^1.2.0",
     "commander": "^15.0.0",
     "picocolors": "^1.1.1",
-    "playwright": "1.63.0",
+    "playwright": "1.64.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
